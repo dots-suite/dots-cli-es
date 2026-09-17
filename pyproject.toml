@@ -19,6 +19,7 @@ dependencies = [
     "lxml",
     "requests",
     "PyYAML",
+    "pydantic>=2,<3",
     "thunderdots>=0.1.dev,<0.2",
 ]
 

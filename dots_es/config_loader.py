@@ -4,27 +4,11 @@ from typing import Any
 
 import yaml
 
+from dots_es.config_schema import IndexingConfig, SearchConfig, SourceConfig
+
 # ============================================================
 # LOAD YAML CONFIG
 # ============================================================
-
-def replace_none_with_empty_string(d: Any) -> Any:
-    """Recursively replace all None values in a dict/list with empty strings.
-
-    :param d: Dictionary, list, or value to process
-    :type d: any
-    :return: Dictionary, list, or value with None replaced by ''
-    :rtype: any
-    """
-    if isinstance(d, dict):
-        return {k: replace_none_with_empty_string(v) for k, v in d.items()}
-    elif isinstance(d, list):
-        return [replace_none_with_empty_string(v) for v in d]
-    elif d is None:
-        return ""
-    else:
-        return d
-
 
 def resolve_env_vars(d: Any) -> Any:
     """Recursively replace environment variable placeholders (e.g., ${VAR}) in strings.
@@ -60,14 +44,15 @@ def es_basic_auth():
 
 
 def load_config(alias: str) -> dict:
-    """Load a YAML configuration file, replace None with empty strings, resolve environment variables,
+    """Load a YAML configuration file, resolve environment variables, validate it with Pydantic,
     and flatten 'source' + 'config' sections for compatibility with App.
 
     :param alias: Configuration alias corresponding to config/{alias}.yml
     :type alias: str
-    :return: Flattened configuration dictionary
+    :return: Flattened, validated configuration dictionary
     :rtype: dict
     :raises FileNotFoundError: if the YAML config file does not exist
+    :raises pydantic.ValidationError: if the configuration does not match the schema
     """
     config_path = resources.files("dots_es") / "config" / f"{alias}.yml"
 
@@ -77,18 +62,23 @@ def load_config(alias: str) -> dict:
     with config_path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    # Replace None values with empty strings
-    config = replace_none_with_empty_string(config)
     # Resolve environment variables
     config = resolve_env_vars(config)
 
-    # Flatten 'source' and 'config' sections for App compatibility
-    flat_config = {}
-    flat_config.update(config.get("source", {}))
-    flat_config.update(config.get("config", {}))
+    # Validate the 'source', 'config' and 'indexing' sections against the Pydantic schema
+    source = SourceConfig.model_validate(config.get("source", {}))
+    search = SearchConfig.model_validate(config.get("config", {}))
+    indexing = IndexingConfig.model_validate(config.get("indexing", {}))
 
-    # Ensure ADDITIONAL_EXCLUDED_COLLECTIONS exists and is a lowercase set
+    # Flatten validated sections for App compatibility
+    flat_config = (
+        source.model_dump(mode="json")
+        | search.model_dump(mode="json")
+        | indexing.model_dump(mode="json")
+    )
+
+    # Ensure ADDITIONAL_EXCLUDED_COLLECTIONS is a lowercase set
     flat_config["ADDITIONAL_EXCLUDED_COLLECTIONS"] = set(
-        c.lower() for c in flat_config.get("ADDITIONAL_EXCLUDED_COLLECTIONS", [])
+        source.ADDITIONAL_EXCLUDED_COLLECTIONS
     )
     return flat_config

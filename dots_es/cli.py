@@ -2269,7 +2269,7 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
     Entry point to crawl collections.
     Handles full tree or only branches leading to target_collections.
     """
-    semaphore = asyncio.Semaphore(app.config.get("MAX_CONCURRENT_REQUESTS", 5))
+    semaphore = asyncio.Semaphore(app.config["MAX_CONCURRENT_REQUESTS"])
     visited = set()
 
     resource_queue = asyncio.Queue(maxsize=200)
@@ -2287,10 +2287,7 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
         )
     )
 
-    RESOURCE_WORKERS = app.config.get(
-        "RESOURCE_WORKERS",
-        5
-    )
+    RESOURCE_WORKERS = app.config["RESOURCE_WORKERS"]
 
     workers = [
         asyncio.create_task(

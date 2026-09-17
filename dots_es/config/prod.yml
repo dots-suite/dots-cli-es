@@ -16,3 +16,9 @@ config:
   COLLECTION_INDEX: "dots_collection"
   SEARCH_RESULT_PER_PAGE: 200
 
+# -------------------------------------------------------------------
+# Paramètres d'indexation
+# -------------------------------------------------------------------
+indexing:
+  MAX_CONCURRENT_REQUESTS: 5
+  RESOURCE_WORKERS: 5

@@ -46,6 +46,15 @@
         ]
       }
     },
+    "normalizer": {
+      "sortable": {
+        "type": "custom",
+        "filter": [
+          "lowercase",
+          "asciifolding"
+        ]
+      }
+    },
     "analyzer": {
       "folding": {
         "tokenizer": "standard",

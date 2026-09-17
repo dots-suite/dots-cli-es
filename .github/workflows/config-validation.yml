@@ -1,0 +1,22 @@
+name: config-validation
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  validate-config:
+    runs-on: ubuntu-latest
+    env:
+      ES_PASSWORD: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e . -r requirements-dev.txt
+      - name: Run tests
+        run: pytest
