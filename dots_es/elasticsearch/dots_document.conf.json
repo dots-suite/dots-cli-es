@@ -38,6 +38,41 @@
         }
       },
       {
+        "fragment_temporal_dates": {
+          "path_match": "fragment_temporal.*_iso",
+          "mapping": {
+            "type": "date"
+          }
+        }
+      },
+      {
+        "fragment_temporal_years": {
+          "path_match": "fragment_temporal.*_start",
+          "match_mapping_type": "long",
+          "mapping": {
+            "type": "integer"
+          }
+        }
+      },
+      {
+        "fragment_temporal_years_end": {
+          "path_match": "fragment_temporal.*_end",
+          "match_mapping_type": "long",
+          "mapping": {
+            "type": "integer"
+          }
+        }
+      },
+      {
+        "fragment_temporal_strings": {
+          "path_match": "fragment_temporal.*",
+          "match_mapping_type": "string",
+          "mapping": {
+            "type": "keyword"
+          }
+        }
+      },
+      {
         "resource_metadata_strings": {
           "path_match": "resource_metadata.*",
           "match_mapping_type": "string",
@@ -167,6 +202,10 @@
         "dynamic": true
       },
       "temporal": {
+        "type": "object",
+        "dynamic": true
+      },
+      "fragment_temporal": {
         "type": "object",
         "dynamic": true
       }

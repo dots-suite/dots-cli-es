@@ -25,6 +25,7 @@ is fixed: one deployment, one configuration directory.
 | `TARGET_COLLECTION` | Identifier of the collection to crawl. **Case-sensitive** — it must match the DTS identifier exactly (`ENCPOS`, not `encpos`). **Empty** means "start from the DTS root collection", which is resolved at runtime. |
 | `CUSTOM_SETTINGS_PATH` | Directory of front-end `*.conf.json` settings files. Every `excludeCollectionIds` entry found there is added to the exclusion set. Environment-interpolated. |
 | `ADDITIONAL_EXCLUDED_COLLECTIONS` | List of collection ids to skip, merged with the ones derived from `CUSTOM_SETTINGS_PATH`. **Case-insensitive**, unlike `TARGET_COLLECTION`: both the list and the candidate identifier are lowercased before comparison, so `ENCPOS` and `encpos` are equivalent here. |
+| `FRAGMENT_TEMPORAL_XPATH` | XPath passed to ThunderDots as `fragment_params.temporal_xpath`, evaluated relative to each fragment in the TEI (e.g. `.//tei:docDate//tei:date`). Matching dates are read from `@when`, `@notBefore`/`@notAfter`, `@from`/`@to` or the text, and stored under `fragment_metadata.tei`. **Empty** (default) means fragment dates come from the DTS navigation metadata only. |
 
 ### `config:` — Elasticsearch and the API
 

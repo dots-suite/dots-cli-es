@@ -969,6 +969,9 @@ def build_filtered_temporal_metadata(
     - les champs temporels bruts
     - les champs *_iso
     - les artefacts extensions.@context
+    - les bornes à l'année 0 : ce n'est pas une année historique mais la
+      marque d'une date sans année ("0000-11-21" dans un obituaire), qui
+      ferait descendre le minimum des facettes temporelles à 0
     """
 
     allowed = {}
@@ -1002,7 +1005,9 @@ def build_filtered_temporal_metadata(
                 thunderdots_key
             )
 
-            if value is not None:
-                allowed[target_path] = value
+            if value is None or value == 0:
+                continue
+
+            allowed[target_path] = value
 
     return allowed

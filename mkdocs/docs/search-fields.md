@@ -53,8 +53,14 @@ schema.org, DoTS extensions, and finally temporal range facets generated from Th
 - allowed extension keys are the `path` of every `SCHEMA` field;
 - **anything not declared is dropped.**
 
+Fragment metadata goes through the same filter (`extract_fragment_metadata()`), so the contract is
+identical at both levels. The optional `tei` block of a fragment is kept as is.
+
 Temporal metadata goes through `build_filtered_temporal_metadata()`, which keeps only the
-`_start`/`_end` bounds of declared range facets and discards raw and `*_iso` values.
+`_start`/`_end` bounds of declared range facets and discards raw and `*_iso` values. It is applied
+to the resource `temporal` and to each `fragment_temporal`. A bound equal to year 0 is dropped: no
+such year exists in historical dating, and the value only appears for dates without a year, such as
+`0000-11-21` in an obituary.
 
 !!! note "`DOTS` fields are declared but deliberately not indexed"
     The extension whitelist collects only fields whose family is `SCHEMA`, so the two `DOTS`

@@ -49,7 +49,7 @@ the built-in `french` analyzer instead.
 
 ## `dots_document.conf.json`
 
-`"dynamic": "strict"` plus six **dynamic templates**, which is what lets new metadata fields appear
+`"dynamic": "strict"` plus ten **dynamic templates**, which is what lets new metadata fields appear
 without a mapping change:
 
 | Template | Matches | Mapped as |
@@ -58,12 +58,19 @@ without a mapping change:
 | `temporal_years` | `temporal.*_start` | `integer` |
 | `temporal_years_end` | `temporal.*_end` | `integer` |
 | `temporal_strings` | `temporal.*` (string) | `keyword` |
+| `fragment_temporal_dates`, `fragment_temporal_years`, `fragment_temporal_years_end`, `fragment_temporal_strings` | `fragment_temporal.*`, same suffixes | same as the `temporal_*` templates |
 | `resource_metadata_strings` | `resource_metadata.*` (string) | `text` / `folding`, `term_vector: with_positions_offsets`, sub-fields `keyword` and `sort` |
 | `fragment_metadata_strings` | `fragment_metadata.*` (string) | same as above |
 
 Explicit properties include `resource_id`, `passage_id`, `citeType`, `path`, `path_ids`,
-`collection_facets` (keyword), `level` (integer), `title` and `content` (`text` / `folding`), plus two
+`collection_facets` (keyword), `level` (integer), `title` and `content` (`text` / `folding`), the dynamic
+objects `resource_metadata`, `fragment_metadata`, `temporal` and `fragment_temporal`, plus two
 **nested** objects: `ancestors` and `collections`.
+
+!!! warning "New top-level fields need a mapping change"
+    Because the root is `strict`, a document carrying a top-level field that the conf does not
+    declare is rejected. `fragment_temporal` was added this way: an index created before it must be
+    rebuilt (`update-conf --rebuild`) and reindexed.
 
 !!! important "`term_vector` is not optional"
     `content` is mapped with `term_vector: with_positions_offsets` because the search API uses the

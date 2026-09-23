@@ -19,7 +19,7 @@ dependencies = [
     "lxml",
     "requests",
     "PyYAML",
-    "thunderdots>=0.1.dev,<0.2",
+    "thunderdots>=0.1.7,<0.2",
 ]
 
 [project.optional-dependencies]

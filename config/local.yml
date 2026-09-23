@@ -6,6 +6,7 @@ source:
   TARGET_COLLECTION: ""  # Identifiant de la collection racine à explorer empty by default
   CUSTOM_SETTINGS_PATH: !!str ${CUSTOM_SETTINGS_PATH}
   ADDITIONAL_EXCLUDED_COLLECTIONS: []
+  FRAGMENT_TEMPORAL_XPATH: ""  # XPath des dates TEI relatif à chaque fragment (ex. ".//tei:docDate//tei:date"), vide = aucune
 
 # -------------------------------------------------------------------
 # Configuration du moteur de recherche ES

@@ -28,8 +28,26 @@ dots-es-cli [--config local|staging|prod] index [--collections id1,id2]
     project. A resource with no fragments falls back to a single `__fulltext__` passage built from its
     plain text.
 
-    A fragment carries `id`, `level`, `head`, `content`, `citeType`, `parent` and
-    `metadata_dublincore`.
+    A fragment carries `id`, `level`, `head`, `content`, `citeType`, `parent`, its own `metadata`
+    (`dublincore` and `extensions` from the DTS navigation member, `tei` from
+    [`FRAGMENT_TEMPORAL_XPATH`](configuration.md)) and its own `temporal` index.
+
+## Resource and fragment metadata
+
+Each passage document holds two separate sets of metadata:
+
+| Field | Source |
+|---|---|
+| `resource_metadata`, `temporal` | The resource the passage belongs to, repeated on every passage. |
+| `fragment_metadata`, `fragment_temporal` | The fragment itself. Empty when the DTS server describes nothing at that level. |
+
+ThunderDots never copies resource metadata or dates into fragments, and neither does this project:
+a cartulaire act dated March 1241 has `fragment_temporal` 1241, while its `temporal` holds the
+coverage of the whole cartulaire (1204–1715) and the date of the edition.
+
+`fragment_metadata.dublincore` and `fragment_metadata.extensions` follow the same
+[SEARCH_FIELDS contract](search-fields.md) as the resource metadata; `fragment_temporal` goes through
+the same `build_filtered_temporal_metadata()`.
 
 ## Options
 

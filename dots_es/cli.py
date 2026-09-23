@@ -5,6 +5,7 @@ import os
 import csv
 from datetime import datetime, timezone
 import time
+from functools import lru_cache
 from typing import Any, Optional
 from importlib import resources
 
@@ -907,6 +908,94 @@ def filter_resource_metadata(
     return filtered
 
 
+@lru_cache(maxsize=1)
+def allowed_dublincore_keys() -> frozenset:
+    """
+    Clés Dublin Core autorisées par SEARCH_FIELDS (sans le préfixe "dublincore.").
+    """
+    return frozenset(
+        field.path.removeprefix("dublincore.")
+        for field in SEARCH_FIELDS
+        if field.family == SearchFieldFamily.DCT
+        and field.path.startswith("dublincore.")
+    )
+
+
+@lru_cache(maxsize=1)
+def allowed_extension_keys() -> frozenset:
+    """
+    Clés d'extensions autorisées par SEARCH_FIELDS (sans le préfixe "extensions.").
+
+    Seule la famille SCHEMA est retenue : "@context" et les champs DOTS
+    n'atteignent jamais l'index.
+    """
+    return frozenset(
+        field.path.removeprefix("extensions.")
+        for field in SEARCH_FIELDS
+        if field.family == SearchFieldFamily.SCHEMA
+        and field.path.startswith("extensions.")
+    )
+
+
+def filter_metadata_block(block, allowed_keys) -> dict:
+    """
+    Garde les clés autorisées d'un bloc de métadonnées DTS
+    (dublincore / extensions) et normalise leurs valeurs pour ES.
+    """
+    filtered = {}
+
+    if not isinstance(block, dict):
+        return filtered
+
+    for key, value in block.items():
+
+        if key not in allowed_keys:
+            continue
+
+        normalized = normalize_metadata_value(value)
+
+        if normalized is None:
+            continue
+
+        filtered[key] = normalized
+
+    return filtered
+
+
+def extract_fragment_metadata(fragment: dict) -> dict:
+    """
+    Métadonnées propres d'un fragment ThunderDots (>= 0.1.7).
+
+    ThunderDots les place sous fragment["metadata"] : dublincore et extensions
+    viennent du membre de navigation DTS, tei des dates trouvées par
+    temporal_xpath. dublincore et extensions suivent le même contrat
+    SEARCH_FIELDS que les ressources ; le bloc tei n'existe que si
+    FRAGMENT_TEMPORAL_XPATH est configuré.
+    """
+    source_metadata = fragment.get("metadata") or {}
+
+    fragment_metadata = {
+        "dublincore": filter_metadata_block(
+            source_metadata.get("dublincore"),
+            allowed_dublincore_keys()
+        ),
+        "extensions": filter_metadata_block(
+            source_metadata.get("extensions"),
+            allowed_extension_keys()
+        ),
+    }
+
+    tei = source_metadata.get("tei")
+
+    if isinstance(tei, dict) and tei:
+        fragment_metadata["tei"] = {
+            key: normalize_metadata_value(value)
+            for key, value in tei.items()
+        }
+
+    return fragment_metadata
+
+
 def extract_metadata(
     response,
     parent_id=None,
@@ -961,87 +1050,20 @@ def extract_metadata(
 
 
     # ==========================================================
-    # Allowed metadata fields from SearchField contract
+    # Dublin Core / schema extensions, filtered by SEARCH_FIELDS
     # ==========================================================
 
-    allowed_dct_fields = {
-        field.path.removeprefix("dublincore.")
-        for field in SEARCH_FIELDS
-        if field.family == SearchFieldFamily.DCT
-        and field.path.startswith("dublincore.")
-    }
+    source_metadata = response.get("metadata", {})
 
-
-    allowed_schema_fields = {
-        field.path.removeprefix("extensions.")
-        for field in SEARCH_FIELDS
-        if field.family == SearchFieldFamily.SCHEMA
-        and field.path.startswith("extensions.")
-    }
-
-
-    # ==========================================================
-    # Dublin Core
-    # ==========================================================
-
-    dublincore = {}
-
-    dc = (
-        response
-        .get("metadata", {})
-        .get("dublincore", {})
+    metadata["dublincore"] = filter_metadata_block(
+        source_metadata.get("dublincore"),
+        allowed_dublincore_keys()
     )
 
-    if isinstance(dc, dict):
-
-        for key, value in dc.items():
-
-            if key not in allowed_dct_fields:
-                continue
-
-            normalized = normalize_metadata_value(
-                value
-            )
-
-            if normalized is None:
-                continue
-
-            dublincore[key] = normalized
-
-
-    metadata["dublincore"] = dublincore
-
-
-    # ==========================================================
-    # Schema extensions
-    # ==========================================================
-
-    extensions = {}
-
-    ext = (
-        response
-        .get("metadata", {})
-        .get("extensions", {})
+    metadata["extensions"] = filter_metadata_block(
+        source_metadata.get("extensions"),
+        allowed_extension_keys()
     )
-
-    if isinstance(ext, dict):
-
-        for key, value in ext.items():
-
-            if key not in allowed_schema_fields:
-                continue
-
-            normalized = normalize_metadata_value(
-                value
-            )
-
-            if normalized is None:
-                continue
-
-            extensions[key] = normalized
-
-
-    metadata["extensions"] = extensions
 
 
     # ==========================================================
@@ -1398,10 +1420,12 @@ async def index_resource_passages_async(
                 "level": fragment.get("level"),
                 "title": fragment.get("head"),
                 "content": text,
-                "fragment_metadata": {
-                    "dublincore": fragment.get("metadata_dublincore", {}),
-                    "extensions": fragment.get("metadata_extensions", {})
-                },
+                "fragment_metadata": extract_fragment_metadata(fragment),
+                # Dates of the fragment itself; "temporal" below stays the
+                # resource's. ThunderDots never copies one into the other.
+                "fragment_temporal": build_filtered_temporal_metadata(
+                    fragment.get("temporal") or {}
+                ),
                 "path": resource_metadata.get("path"),
                 "path_ids": resource_metadata.get("path_ids"),
                 "ancestors": ancestors,
@@ -2347,6 +2371,28 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
     await client.aclose()
 
 
+def build_fragment_params(app) -> dict:
+    """
+    fragment_params passed to ThunderDots.
+
+    With at least one metadata source, ThunderDots (temporal_index="auto")
+    computes a temporal index per fragment from the fragment's own metadata.
+    FRAGMENT_TEMPORAL_XPATH, evaluated relative to each fragment, adds the
+    TEI dates (@when, @notBefore/@notAfter, @from/@to or text) under "tei".
+    """
+    fragment_params = {
+        "metadata_dublincore": None,
+        "metadata_extensions": None,
+    }
+
+    temporal_xpath = app.config.get("FRAGMENT_TEMPORAL_XPATH")
+
+    if temporal_xpath:
+        fragment_params["temporal_xpath"] = temporal_xpath
+
+    return fragment_params
+
+
 async def dotsplorer(app, collections, _index_name):
     """
         Commande principale d'indexation :
@@ -2446,9 +2492,7 @@ async def dotsplorer(app, collections, _index_name):
                 "metadata_extensions": None,
                 "add_head_to_content": False,
             },
-            fragment_params={
-                "metadata_dublincore": None
-            },
+            fragment_params=build_fragment_params(app),
         )
 
         td.fetch()
