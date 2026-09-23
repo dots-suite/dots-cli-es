@@ -44,7 +44,7 @@ def test_fragment_metadata_follows_search_fields_contract():
     metadata = extract_fragment_metadata(CARTULAIRE_FRAGMENT)
 
     assert metadata == {
-        "dublincore": {"language": "lat", "title": "1 (Mars 1241)"},
+        "dublincore": {"date": "1241-03", "language": "lat", "title": "1 (Mars 1241)"},
         "extensions": {"dateCreated": "1241-03", "inLanguage": "lat", "name": "1 (Mars 1241)"},
     }
 
@@ -61,8 +61,27 @@ def test_fragment_without_metadata():
 
 def test_fragment_temporal_keeps_declared_year_bounds_only():
     assert build_filtered_temporal_metadata(CARTULAIRE_FRAGMENT["temporal"]) == {
+        "temporal.dublincore.date_start": 1241,
+        "temporal.dublincore.date_end": 1241,
         "temporal.extensions.dateCreated_start": 1241,
         "temporal.extensions.dateCreated_end": 1241,
+    }
+
+
+def test_fragment_temporal_keeps_tei_date():
+    # ThunderDots always stores the first TEI match under "tei.date",
+    # whatever FRAGMENT_TEMPORAL_XPATH selects; "tei.dates" is not a range.
+    temporal = {
+        "tei.date": "1173-05-02",
+        "tei.date_start": 1173,
+        "tei.date_start_iso": "1173-05-02",
+        "tei.date_end": 1173,
+        "tei.date_end_iso": "1173-05-02",
+    }
+
+    assert build_filtered_temporal_metadata(temporal) == {
+        "temporal.tei.date_start": 1173,
+        "temporal.tei.date_end": 1173,
     }
 
 

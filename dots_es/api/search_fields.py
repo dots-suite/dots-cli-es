@@ -231,6 +231,13 @@ SEARCH_FIELDS = [
     ),
 
     SearchField(
+        "dct:date",
+        "dublincore.date",
+        SearchFieldFamily.DCT,
+        SearchFieldType.TEMPORAL,
+    ),
+
+    SearchField(
         "dct:issued",
         "dublincore.issued",
         SearchFieldFamily.DCT,
@@ -489,6 +496,16 @@ SEARCH_FIELDS = [
     ),
 
     SearchField(
+        id="dct:date:range",
+        path="temporal.dublincore.date",
+        range_start="temporal.dublincore.date_start",
+        range_end="temporal.dublincore.date_end",
+        family=SearchFieldFamily.DCT,
+        type=SearchFieldType.TEMPORAL,
+        facet=True,
+    ),
+
+    SearchField(
         id="dct:issued:range",
         path="temporal.dublincore.issued",
         range_start="temporal.dublincore.issued_start",
@@ -534,6 +551,19 @@ SEARCH_FIELDS = [
         range_start="temporal.extensions.temporalCoverage_start",
         range_end="temporal.extensions.temporalCoverage_end",
         family=SearchFieldFamily.SCHEMA,
+        type=SearchFieldType.TEMPORAL,
+        facet=True,
+    ),
+
+    # Fragment dates read in the TEI by ThunderDots (FRAGMENT_TEMPORAL_XPATH).
+    # The key is always "tei.date" whatever the XPath: the XPath decides what
+    # the date means (docDate, any date...), not where it is stored.
+    SearchField(
+        id="tei:date:range",
+        path="temporal.tei.date",
+        range_start="temporal.tei.date_start",
+        range_end="temporal.tei.date_end",
+        family=SearchFieldFamily.THUNDERDOTS,
         type=SearchFieldType.TEMPORAL,
         facet=True,
     ),
