@@ -787,11 +787,14 @@ def range_field_by_es_path(es_path: str):
     """
     Resolve a temporal field discovered in the Elasticsearch mapping.
 
-    The mapping exposes `temporal.temporal.dublincore.created`, while the
-    registry stores the inner path `temporal.dublincore.created`, so both
-    spellings are tried.
+    The mapping exposes `temporal.temporal.dublincore.created` -- or
+    `fragment_temporal.temporal.dublincore.created` for the dates of a
+    fragment -- while the registry stores the inner path
+    `temporal.dublincore.created`, so each spelling is tried.
     """
-    candidates = (es_path, es_path.removeprefix("temporal."))
+    inner_path = es_path.removeprefix("fragment_temporal.")
+
+    candidates = (es_path, inner_path, inner_path.removeprefix("temporal."))
 
     for candidate in candidates:
         for field in SEARCH_FIELDS:

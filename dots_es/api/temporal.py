@@ -1,4 +1,5 @@
 import logging
+import re
 
 from functools import lru_cache
 
@@ -10,8 +11,34 @@ from dots_es.api.search_fields import (
 logger = logging.getLogger(__name__)
 
 
-@lru_cache(maxsize=8)
-def get_temporal_fields(es, index: str) -> list[str]:
+# Root of the temporal index searched at each level (`scope` parameter):
+# the resource dates are repeated on every passage under `temporal`, the
+# fragment's own dates live under `fragment_temporal`.
+TEMPORAL_ROOTS = {
+    "resource": "temporal",
+    "fragment": "fragment_temporal",
+}
+
+
+@lru_cache(maxsize=16)
+def get_temporal_mapping(es, index: str, root: str = "temporal") -> dict:
+    """
+    Mapping of every field under `root` (`temporal` or `fragment_temporal`).
+    """
+    mapping = es.indices.get_field_mapping(
+        index=index,
+        fields=f"{root}.*"
+    )
+
+    return mapping[index]["mappings"]
+
+
+def _es_type(definition: dict):
+    return next(iter(definition.get("mapping", {}).values()), {}).get("type")
+
+
+@lru_cache(maxsize=16)
+def get_temporal_fields(es, index: str, root: str = "temporal") -> list[str]:
     """
     Découvre automatiquement les champs temporels disposant
     d'un couple _start / _end numérique.
@@ -25,12 +52,7 @@ def get_temporal_fields(es, index: str) -> list[str]:
     ]
     """
 
-    mapping = es.indices.get_field_mapping(
-        index=index,
-        fields="temporal.*"
-    )
-
-    fields = mapping[index]["mappings"]
+    fields = get_temporal_mapping(es, index, root)
 
     temporal_fields = []
 
@@ -74,6 +96,22 @@ def get_temporal_fields(es, index: str) -> list[str]:
     return sorted(temporal_fields)
 
 
+@lru_cache(maxsize=16)
+def get_iso_temporal_fields(es, index: str, root: str = "temporal") -> frozenset[str]:
+    """
+    Champs temporels dont les bornes ISO (_start_iso / _end_iso) sont
+    indexées en `date` : ils acceptent des plages au mois ou au jour.
+    """
+    fields = get_temporal_mapping(es, index, root)
+
+    return frozenset(
+        field
+        for field in get_temporal_fields(es, index, root)
+        if _es_type(fields.get(f"{field}_start_iso", {})) == "date"
+        and _es_type(fields.get(f"{field}_end_iso", {})) == "date"
+    )
+
+
 @lru_cache(maxsize=64)
 def temporal_key(field: str) -> str:
     """
@@ -104,11 +142,80 @@ def temporal_key(field: str) -> str:
     return key
 
 
+# A bound of an ISO range, with its precision: "1241", "1241-03",
+# "1241-03-17", or the same with a leading minus sign ("-0050").
+ISO_BOUND_RE = re.compile(r"-?\d{4}(?:-\d{2}(?:-\d{2})?)?")
+
+ISO_BOUND_FORMAT = "strict_date||strict_year_month||strict_year"
+
+RANGE_OPERATORS = {"gt", "gte", "lt", "lte"}
+
+
+def iso_bound(value: str) -> str:
+    """
+    Date math anchor for a partial ISO bound, rounded to its own precision.
+
+    Elasticsearch rounds `gte`/`lt` down and `gt`/`lte` up, so
+    `lte: 1241-03||/M` reaches the last millisecond of March 1241 and
+    `gte: 1241||/y` starts on 1241-01-01.
+    """
+    value = value.strip()
+
+    if not ISO_BOUND_RE.fullmatch(value):
+        raise ValueError(
+            f"Invalid date bound {value!r}: expected YYYY, YYYY-MM or YYYY-MM-DD"
+        )
+
+    precision = value.lstrip("-").count("-")
+
+    return f"{value}||/{'yMd'[precision]}"
+
+
+def build_range_clause(range_query: dict) -> dict:
+    """
+    Elasticsearch `range` clause for one `range[<field>]` parameter.
+
+    Year bounds (`..._start`, `..._end`) are sent as is. ISO bounds
+    (`..._start_iso`, `..._end_iso`) accept a year, a month or a day and are
+    rounded to that precision.
+    """
+    field, condition = next(iter(range_query.items()))
+
+    for op in condition:
+        if op not in RANGE_OPERATORS:
+            raise ValueError(f"Invalid range operator {op!r} on {field}")
+
+    if not field.endswith("_iso"):
+        return {"range": {field: dict(condition)}}
+
+    return {
+        "range": {
+            field: {
+                **{op: iso_bound(value) for op, value in condition.items()},
+                "format": ISO_BOUND_FORMAT,
+            }
+        }
+    }
+
+
+def range_fields_of(field: str) -> set[str]:
+    """
+    Every bound of a temporal facet: years and ISO dates.
+    """
+    return {
+        f"{field}_start",
+        f"{field}_end",
+        f"{field}_start_iso",
+        f"{field}_end_iso",
+    }
+
+
 def build_temporal_aggs(
     temporal_fields,
     base_must,
     base_filters,
-    ranges
+    ranges,
+    iso_fields=frozenset()
 ):
     aggs = {}
 
@@ -120,19 +227,32 @@ def build_temporal_aggs(
         end_field = field + "_end"
 
         # Toutes les ranges SAUF celles qui concernent
-        # la facette temporelle courante.
-        facet_ranges = []
+        # la facette temporelle courante (années ou dates ISO).
+        own_fields = range_fields_of(field)
 
-        for range_query in ranges:
-            if start_field in range_query:
-                continue
+        facet_ranges = [
+            build_range_clause(range_query)
+            for range_query in ranges
+            if not own_fields & range_query.keys()
+        ]
 
-            if end_field in range_query:
-                continue
+        bounds_aggs = {
+            # Enveloppe globale des plages
+            "min": {
+                "min": {
+                    "field": start_field
+                }
+            },
+            "max": {
+                "max": {
+                    "field": end_field
+                }
+            },
+        }
 
-            facet_ranges.append({
-                "range": range_query
-            })
+        if field in iso_fields:
+            bounds_aggs["min_iso"] = {"min": {"field": start_field + "_iso"}}
+            bounds_aggs["max_iso"] = {"max": {"field": end_field + "_iso"}}
 
         facet_bool = {
             "must": list(base_must),
@@ -148,17 +268,7 @@ def build_temporal_aggs(
                     },
                     "aggs": {
 
-                        # Enveloppe globale des plages
-                        "min": {
-                            "min": {
-                                "field": start_field
-                            }
-                        },
-                        "max": {
-                            "max": {
-                                "field": end_field
-                            }
-                        },
+                        **bounds_aggs,
 
                         # # Intersection commune
                         # "intersection_min": {
@@ -196,7 +306,8 @@ def unflatten_dict(data):
 
 def extract_temporal_facets(
     aggregations: dict,
-    temporal_fields: list[str]
+    temporal_fields: list[str],
+    iso_fields=frozenset()
 ) -> list[dict]:
 
     facets = []
@@ -238,7 +349,7 @@ def extract_temporal_facets(
         #         "max": int(intersection_max)
         #     }
 
-        facets.append({
+        facet = {
             "key": temporal_key(field),
             # Fallback label: the canonical key itself, so a collection with
             # no configured label displays exactly the string an editor has
@@ -250,22 +361,37 @@ def extract_temporal_facets(
             "end_field": field + "_end",
             "min": int(min_value),
             "max": int(max_value),
-        })#"intersection": intersection
+        }#"intersection": intersection
+
+        # Day-precision bounds, when the facet has ISO dates indexed.
+        # value_as_string is in the strict_date format of the mapping.
+        min_iso = filtered.get("min_iso", {}).get("value_as_string")
+        max_iso = filtered.get("max_iso", {}).get("value_as_string")
+
+        if field in iso_fields and min_iso and max_iso:
+            facet.update({
+                "start_field_iso": field + "_start_iso",
+                "end_field_iso": field + "_end_iso",
+                "min_iso": min_iso,
+                "max_iso": max_iso,
+            })
+
+        facets.append(facet)
 
     return facets
 
 
 def build_open_range(range_query):
-    field, condition = next(iter(range_query.items()))
+    """
+    Range that also lets through documents without the field: a resource
+    with no date for this property is not excluded by a date filter.
+    """
+    field = next(iter(range_query))
 
     return {
         "bool": {
             "should": [
-                {
-                    "range": {
-                        field: condition
-                    }
-                },
+                build_range_clause(range_query),
                 {
                     "bool": {
                         "must_not": [

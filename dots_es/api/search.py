@@ -5,8 +5,11 @@ from typing import Callable
 from flask import Response, request, current_app
 
 from dots_es.api.temporal import (
+    TEMPORAL_ROOTS,
     get_temporal_fields,
+    get_iso_temporal_fields,
     temporal_key,
+    build_range_clause,
     build_temporal_aggs,
     extract_temporal_facets,
     build_open_range,
@@ -69,6 +72,9 @@ def parse_query_param(query_param: str, searchType: str = "notice"):
         "fulltext": {
             "content": "content",
             "title": "title",
+        },
+        "fragment_notice": {
+            "title": "title",
         }
     }
 
@@ -85,6 +91,13 @@ def parse_query_param(query_param: str, searchType: str = "notice"):
         "fulltext": [
             "content",
             "title"
+        ],
+        # Notice search at fragment level: the fragment's own description,
+        # not its text (an act titled "Donation de Louis VII.").
+        "fragment_notice": [
+            "title",
+            "fragment_metadata.dublincore.title",
+            "fragment_metadata.extensions.name"
         ]
     }
 
@@ -356,9 +369,31 @@ def register_search_endpoint(
         if index is None or len(index) == 0:
             index = current_app.config["DOCUMENT_INDEX"]
 
+        # Level at which dates are filtered and faceted:
+        # - resource (default): the resource dates, repeated on each passage;
+        # - fragment: the fragment's own dates (fragment_temporal). Results
+        #   are then always resources grouped with their matching fragments,
+        #   and a date range excludes the fragments that have no date.
+        scope = request.args.get("scope") or "resource"
+
+        if scope not in TEMPORAL_ROOTS:
+            return Response(
+                f"Invalid scope {scope!r}: expected one of {', '.join(TEMPORAL_ROOTS)}",
+                status=400
+            )
+
+        temporal_root = TEMPORAL_ROOTS[scope]
+
         temporal_fields = get_temporal_fields(
             current_app.elasticsearch,
-            index
+            index,
+            temporal_root
+        )
+
+        iso_fields = get_iso_temporal_fields(
+            current_app.elasticsearch,
+            index,
+            temporal_root
         )
 
         # Temporal facets explicitly disabled by the client
@@ -485,7 +520,7 @@ def register_search_endpoint(
         try:
 
             # === CAS 1 : Recherche simple sur ressources filtrée par collection ===
-            if no_highlight:
+            if no_highlight and scope == "resource":
                 print('\nRESOURCE SEARCH')
 
                 scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
@@ -578,7 +613,8 @@ def register_search_endpoint(
                         temporal_fields,
                         base_must,
                         base_filters,
-                        ranges
+                        ranges,
+                        iso_fields
                     )
                 )
 
@@ -620,7 +656,8 @@ def register_search_endpoint(
 
                 temporal_facets = extract_temporal_facets(
                     search_result["aggregations"],
-                    temporal_fields
+                    temporal_fields,
+                    iso_fields
                 )
 
 
@@ -655,8 +692,28 @@ def register_search_endpoint(
                 }
 
             # === CAS 2 : Full-text search grouped by resource using composite + top_hits ===
+            # Also serves every fragment-level search, notice mode included:
+            # the query then targets the fragment's description, not its text.
             else:
-                print('\nHIGHLIGHTS SEARCH')
+                print('\nHIGHLIGHTS SEARCH', scope)
+
+                query_type = "fragment_notice" if no_highlight else "fulltext"
+
+                fragment_source = [
+                    "passage_id",
+                    "title",
+                    "level",
+                    "ancestors",
+                    "citeType"
+                ]
+
+                fragment_sort = [{"_score": "desc"}]
+
+                if scope == "fragment":
+                    fragment_source += ["fragment_metadata", "fragment_temporal"]
+                    # Equal scores (no query, filters only): keep the
+                    # fragments in document order.
+                    fragment_sort.append({"passage_id": "asc"})
 
                 scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
 
@@ -721,15 +778,10 @@ def register_search_endpoint(
                         "inner_hits": {
                             "name": "fragments",
                             "size": 100,
-                            "sort": [{"_score": "desc"}],
-                            # 5 keys are used for fragments (highlight not linked to _source)
-                            "_source": [
-                                "passage_id",
-                                "title",
-                                "level",
-                                "ancestors",
-                                "citeType"
-                            ],
+                            "sort": fragment_sort,
+                            # 5 keys are used for fragments (highlight not linked to _source),
+                            # plus the fragment's own metadata and dates at fragment scope
+                            "_source": fragment_source,
                             "highlight": highlight_config
                         }
                     },
@@ -755,7 +807,7 @@ def register_search_endpoint(
                 )
 
                 if query_param:
-                    body_query["query"]["bool"]["must"].extend(parse_query_param(query_param, "fulltext"))
+                    body_query["query"]["bool"]["must"].extend(parse_query_param(query_param, query_type))
                 else:
                     body_query["query"]["bool"]["must"].append({"match_all": {}})
 
@@ -830,14 +882,22 @@ def register_search_endpoint(
                         temporal_fields,
                         base_must,
                         base_filters,
-                        ranges
+                        ranges,
+                        iso_fields
                     )
                 )
 
-                # Ajouter les ranges
+                # Ajouter les ranges. At fragment scope a fragment without a
+                # date does not pass a date filter: most of them are prefaces,
+                # tables or notices, not undated acts.
                 if ranges:
+                    build_range = (
+                        build_range_clause
+                        if scope == "fragment"
+                        else build_open_range
+                    )
                     body_query["query"]["bool"]["must"].extend(
-                        [build_open_range(r) for r in ranges]
+                        [build_range(r) for r in ranges]
                     )
 
                 body_query["aggregations"]["filtered_resource_count"] = {
@@ -936,6 +996,17 @@ def register_search_endpoint(
                                 "level": h["_source"].get("level", 1),
                                 "ancestors": h["_source"].get("ancestors", []),
                                 "citeType": h["_source"].get("citeType"),
+                                **(
+                                    {
+                                        "metadata": h["_source"].get("fragment_metadata", {}),
+                                        "temporal": unflatten_dict({
+                                            key.removeprefix("temporal."): value
+                                            for key, value in h["_source"].get("fragment_temporal", {}).items()
+                                        }),
+                                    }
+                                    if scope == "fragment"
+                                    else {}
+                                ),
                                 "highlight": {
                                     "content": [
                                         # add_ellipsis(frag) - no longer in use, see above
@@ -948,7 +1019,11 @@ def register_search_endpoint(
                         ]
                     })
 
-                temporal_facets = extract_temporal_facets(search_result["aggregations"], temporal_fields)
+                temporal_facets = extract_temporal_facets(
+                    search_result["aggregations"],
+                    temporal_fields,
+                    iso_fields
+                )
 
                 facets = {
                     **extract_searchfield_facets(
@@ -979,6 +1054,7 @@ def register_search_endpoint(
                 else None
             )
 
+            r["scope"] = scope
             r["duration"] = float('%.4f' % (time.time() - start_time))
 
         except Exception as e:
