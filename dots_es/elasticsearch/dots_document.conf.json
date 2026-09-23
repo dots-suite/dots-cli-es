@@ -6,7 +6,8 @@
         "temporal_dates": {
           "path_match": "temporal.*_iso",
           "mapping": {
-            "type": "date"
+            "type": "date",
+            "format": "strict_date"
           }
         }
       },
@@ -41,7 +42,8 @@
         "fragment_temporal_dates": {
           "path_match": "fragment_temporal.*_iso",
           "mapping": {
-            "type": "date"
+            "type": "date",
+            "format": "strict_date"
           }
         }
       },

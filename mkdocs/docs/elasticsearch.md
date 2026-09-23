@@ -54,7 +54,7 @@ without a mapping change:
 
 | Template | Matches | Mapped as |
 |---|---|---|
-| `temporal_dates` | `temporal.*_iso` | `date` |
+| `temporal_dates` | `temporal.*_iso` | `date`, format `strict_date` (`YYYY-MM-DD` only) |
 | `temporal_years` | `temporal.*_start` | `integer` |
 | `temporal_years_end` | `temporal.*_end` | `integer` |
 | `temporal_strings` | `temporal.*` (string) | `keyword` |

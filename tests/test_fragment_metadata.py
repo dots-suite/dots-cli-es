@@ -59,12 +59,16 @@ def test_fragment_without_metadata():
     assert extract_fragment_metadata({"id": "x"}) == {"dublincore": {}, "extensions": {}}
 
 
-def test_fragment_temporal_keeps_declared_year_bounds_only():
+def test_fragment_temporal_keeps_declared_bounds_only():
     assert build_filtered_temporal_metadata(CARTULAIRE_FRAGMENT["temporal"]) == {
         "temporal.dublincore.date_start": 1241,
+        "temporal.dublincore.date_start_iso": "1241-03-01",
         "temporal.dublincore.date_end": 1241,
+        "temporal.dublincore.date_end_iso": "1241-03-31",
         "temporal.extensions.dateCreated_start": 1241,
+        "temporal.extensions.dateCreated_start_iso": "1241-03-01",
         "temporal.extensions.dateCreated_end": 1241,
+        "temporal.extensions.dateCreated_end_iso": "1241-03-31",
     }
 
 
@@ -81,7 +85,9 @@ def test_fragment_temporal_keeps_tei_date():
 
     assert build_filtered_temporal_metadata(temporal) == {
         "temporal.tei.date_start": 1173,
+        "temporal.tei.date_start_iso": "1173-05-02",
         "temporal.tei.date_end": 1173,
+        "temporal.tei.date_end_iso": "1173-05-02",
     }
 
 
@@ -90,7 +96,9 @@ def test_year_zero_is_not_indexed():
     obituary = {
         "extensions.dateCreated": "0000-11-21",
         "extensions.dateCreated_start": 0,
+        "extensions.dateCreated_start_iso": "0",
         "extensions.dateCreated_end": 0,
+        "extensions.dateCreated_end_iso": "0",
     }
 
     assert build_filtered_temporal_metadata(obituary) == {}
@@ -109,3 +117,36 @@ def test_fragment_params_with_temporal_xpath():
     app = SimpleNamespace(config={"FRAGMENT_TEMPORAL_XPATH": ".//tei:docDate//tei:date"})
 
     assert build_fragment_params(app)["temporal_xpath"] == ".//tei:docDate//tei:date"
+
+
+def test_early_years_keep_their_iso_bounds():
+    temporal = {
+        "dublincore.date_start": 795,
+        "dublincore.date_start_iso": "0795-01-01",
+        "dublincore.date_end": 795,
+        "dublincore.date_end_iso": "0795-12-31",
+    }
+
+    assert build_filtered_temporal_metadata(temporal) == {
+        "temporal.dublincore.date_start": 795,
+        "temporal.dublincore.date_start_iso": "0795-01-01",
+        "temporal.dublincore.date_end": 795,
+        "temporal.dublincore.date_end_iso": "0795-12-31",
+    }
+
+
+def test_non_iso_bounds_are_not_indexed_as_dates():
+    # For years <= 0 ThunderDots returns the bare year: a date field would
+    # read "-50" as epoch milliseconds, strict_date would reject the passage.
+    temporal = {
+        "dublincore.coverage_start": -50,
+        "dublincore.coverage_start_iso": "-50",
+        "dublincore.coverage_end": 120,
+        "dublincore.coverage_end_iso": "0120-12-31",
+    }
+
+    assert build_filtered_temporal_metadata(temporal) == {
+        "temporal.dublincore.coverage_start": -50,
+        "temporal.dublincore.coverage_end": 120,
+        "temporal.dublincore.coverage_end_iso": "0120-12-31",
+    }

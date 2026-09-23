@@ -1,5 +1,6 @@
 # search_fields.py
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -96,6 +97,21 @@ class SearchField:
         told apart by `is_range_facet`, not by their key.
         """
         return metadata_key_from_path(self.path)
+
+    @property
+    def range_start_iso(self) -> Optional[str]:
+        """
+        ES path of the ISO start bound (`date`), next to the year bound:
+            temporal.dublincore.date_start -> temporal.dublincore.date_start_iso
+        """
+        return f"{self.range_start}_iso" if self.range_start else None
+
+    @property
+    def range_end_iso(self) -> Optional[str]:
+        """
+        ES path of the ISO end bound (`date`), next to the year bound.
+        """
+        return f"{self.range_end}_iso" if self.range_end else None
 
     @property
     def is_range_facet(self) -> bool:
@@ -982,6 +998,21 @@ def resolve_sort_field(criteria: str) -> str:
     return criteria
 
 
+ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def is_indexable_iso_date(value) -> bool:
+    """
+    True for an AAAA-MM-JJ date that the `strict_date` format of the
+    temporal mapping accepts, year 0 excluded.
+    """
+    return (
+        isinstance(value, str)
+        and ISO_DATE_RE.fullmatch(value) is not None
+        and not value.startswith("0000-")
+    )
+
+
 def build_filtered_temporal_metadata(
     temporal_metadata: dict,
 ) -> dict:
@@ -993,15 +1024,19 @@ def build_filtered_temporal_metadata(
 
     Garde uniquement :
     - les champs range déclarés dans SEARCH_FIELDS
-    - leurs champs _start / _end
+    - leurs bornes en années (_start / _end, integer)
+    - leurs bornes ISO (_start_iso / _end_iso, date), qui gardent la
+      précision de la valeur : "1241-03" donne 1241-03-01 / 1241-03-31
 
     Supprime :
     - les champs temporels bruts
-    - les champs *_iso
     - les artefacts extensions.@context
     - les bornes à l'année 0 : ce n'est pas une année historique mais la
       marque d'une date sans année ("0000-11-21" dans un obituaire), qui
       ferait descendre le minimum des facettes temporelles à 0
+    - les bornes ISO qui ne sont pas des dates AAAA-MM-JJ : pour une année
+      <= 0, Thunderdots renvoie l'année seule ("-50"), qu'un champ date
+      lirait sinon comme des millisecondes depuis 1970
     """
 
     allowed = {}
@@ -1014,12 +1049,12 @@ def build_filtered_temporal_metadata(
 
     for logical_path, field in range_fields.items():
 
-        for source_path, target_path in (
-            (field.range_start, field.range_start),
-            (field.range_end, field.range_end),
+        for year_path, iso_path in (
+            (field.range_start, field.range_start_iso),
+            (field.range_end, field.range_end_iso),
         ):
 
-            if not source_path:
+            if not year_path:
                 continue
 
             # SearchField :
@@ -1027,17 +1062,18 @@ def build_filtered_temporal_metadata(
             #
             # Thunderdots :
             # dublincore.created_start
-            thunderdots_key = source_path.removeprefix(
-                "temporal."
+            year = temporal_metadata.get(
+                year_path.removeprefix("temporal.")
             )
 
-            value = temporal_metadata.get(
-                thunderdots_key
+            if year is not None and year != 0:
+                allowed[year_path] = year
+
+            iso = temporal_metadata.get(
+                iso_path.removeprefix("temporal.")
             )
 
-            if value is None or value == 0:
-                continue
-
-            allowed[target_path] = value
+            if is_indexable_iso_date(iso):
+                allowed[iso_path] = iso
 
     return allowed

@@ -56,11 +56,25 @@ schema.org, DoTS extensions, and finally temporal range facets generated from Th
 Fragment metadata goes through the same filter (`extract_fragment_metadata()`), so the contract is
 identical at both levels. The optional `tei` block of a fragment is kept as is.
 
-Temporal metadata goes through `build_filtered_temporal_metadata()`, which keeps only the
-`_start`/`_end` bounds of declared range facets and discards raw and `*_iso` values. It is applied
-to the resource `temporal` and to each `fragment_temporal`. A bound equal to year 0 is dropped: no
-such year exists in historical dating, and the value only appears for dates without a year, such as
-`0000-11-21` in an obituary.
+Temporal metadata goes through `build_filtered_temporal_metadata()`, which keeps only the bounds of
+declared range facets and discards raw values. It is applied to the resource `temporal` and to each
+`fragment_temporal`. Each bound is kept twice:
+
+| Bound | Type | Example for `1241-03` |
+|---|---|---|
+| `range_start` / `range_end` (`…_start`, `…_end`) | `integer`, year | `1241` / `1241` |
+| `range_start_iso` / `range_end_iso` (`…_start_iso`, `…_end_iso`) | `date`, `strict_date` | `1241-03-01` / `1241-03-31` |
+
+The ISO bounds keep the precision of the source value: a year covers the whole year, a month the
+whole month, a day that single day.
+
+Two kinds of bounds are dropped:
+
+- **year 0**: no such year exists in historical dating, and the value only appears for dates without
+  a year, such as `0000-11-21` in an obituary;
+- **ISO bounds that are not `YYYY-MM-DD` dates**: for years ≤ 0 ThunderDots returns the bare year
+  (`-50`). Under the default date format Elasticsearch would read it as epoch milliseconds
+  (1969-12-31), and under `strict_date` it would reject the whole passage. The year bound is kept.
 
 !!! note "`DOTS` fields are declared but deliberately not indexed"
     The extension whitelist collects only fields whose family is `SCHEMA`, so the two `DOTS`
