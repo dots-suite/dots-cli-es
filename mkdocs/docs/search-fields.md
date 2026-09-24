@@ -68,19 +68,27 @@ declared range facets and discards raw values. It is applied to the resource `te
 The ISO bounds keep the precision of the source value: a year covers the whole year, a month the
 whole month, a day that single day.
 
-Two kinds of bounds are dropped:
+ISO bounds that are not `[-]YYYY-MM-DD` dates are dropped, and the year bound is kept. Before
+ThunderDots 0.1.8, the ISO bound of a year ≤ 0 was the bare year (`-50`), which Elasticsearch would
+read as epoch milliseconds (1969-12-31) under the default date format, and reject with the whole
+passage under `strict_date`. Years beyond four digits (`+170000002-01-01`) are dropped for the same
+reason.
 
-- **year 0**: in ISO 8601 and EDTF `0000` is 1 BC, but in the DoTS corpora it only appears for dates
-  without a year, such as `0000-11-21` in an obituary, which would pull the minimum of the date
-  facets down to 0. The rule can go once those dates are encoded `XXXX-11-21`, which ThunderDots
-  leaves without bounds;
-- **ISO bounds that are not `[-]YYYY-MM-DD` dates**: before its EDTF parser, ThunderDots returned the
-  bare year for years ≤ 0 (`-50`); years beyond four digits (`+170000002-01-01`) are not accepted
-  either. Under the default date format Elasticsearch would read `-50` as epoch milliseconds
-  (1969-12-31), and under `strict_date` it would reject the whole passage. The year bound is kept.
+### Dates are ISO 8601 / EDTF
 
-Years before year 0 keep their ISO bounds, in astronomical numbering: `-0500/0499` is indexed as
-`-0500-01-01` / `0499-12-31` (`-0500` is 501 BC).
+Source dates are taken as ISO 8601 / EDTF, **without interpretation**. Years are therefore
+astronomical, in the index, the API and the facets alike:
+
+| Source value | Meaning | Indexed years | Indexed ISO bounds |
+|---|---|---|---|
+| `-0500/0499` | 501 BC → 499 | `-500` / `499` | `-0500-01-01` / `0499-12-31` |
+| `-0499` | 500 BC | `-499` / `-499` | `-0499-01-01` / `-0499-12-31` |
+| `0000` | 1 BC | `0` / `0` | `0000-01-01` / `0000-12-31` |
+| `XXXX-11-21` | a day, year unknown | none | none |
+
+The indexer cannot tell an editor who wrote `-0500` for 500 BC from one who meant 501 BC, so it does
+not try: providing the right EDTF value is up to the editors, upstream of ThunderDots. A day without a
+year must be written `XXXX-MM-DD`; `0000-MM-DD` is a day of 1 BC.
 
 !!! note "`DOTS` fields are declared but deliberately not indexed"
     The extension whitelist collects only fields whose family is `SCHEMA`, so the two `DOTS`

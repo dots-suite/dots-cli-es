@@ -91,17 +91,23 @@ def test_fragment_temporal_keeps_tei_date():
     }
 
 
-def test_year_zero_is_not_indexed():
-    # Obituary entry "0000-11-21": a day of the year, not a dated act.
-    obituary = {
+def test_year_zero_is_1_bc():
+    # ISO 8601 / EDTF, no interpretation: "0000-11-21" is 21 November 1 BC.
+    # A date without a year must be written "XXXX-11-21" upstream.
+    temporal = {
         "extensions.dateCreated": "0000-11-21",
         "extensions.dateCreated_start": 0,
-        "extensions.dateCreated_start_iso": "0",
+        "extensions.dateCreated_start_iso": "0000-11-21",
         "extensions.dateCreated_end": 0,
-        "extensions.dateCreated_end_iso": "0",
+        "extensions.dateCreated_end_iso": "0000-11-21",
     }
 
-    assert build_filtered_temporal_metadata(obituary) == {}
+    assert build_filtered_temporal_metadata(temporal) == {
+        "temporal.extensions.dateCreated_start": 0,
+        "temporal.extensions.dateCreated_start_iso": "0000-11-21",
+        "temporal.extensions.dateCreated_end": 0,
+        "temporal.extensions.dateCreated_end_iso": "0000-11-21",
+    }
 
 
 def test_fragment_params_without_temporal_xpath():

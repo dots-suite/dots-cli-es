@@ -1009,12 +1009,11 @@ ISO_DATE_RE = re.compile(r"-?\d{4}-\d{2}-\d{2}")
 def is_indexable_iso_date(value) -> bool:
     """
     True for a [-]AAAA-MM-JJ date that the `strict_date` format of the
-    temporal mapping accepts, year 0 excluded.
+    temporal mapping accepts.
     """
     return (
         isinstance(value, str)
         and ISO_DATE_RE.fullmatch(value) is not None
-        and not value.startswith("0000-")
     )
 
 
@@ -1027,6 +1026,11 @@ def build_filtered_temporal_metadata(
     Le temporal Thunderdots est sans préfixe "temporal.".
     Le contrat SearchField utilise les chemins ES complets.
 
+    Les dates sources sont prises pour de l'ISO 8601 / EDTF, sans
+    interprétation : "-0500" est 501 av. J.-C. et "0000" 1 av. J.-C.
+    (numérotation astronomique). Fournir la bonne valeur est à la charge
+    des éditeurs, en amont de Thunderdots.
+
     Garde uniquement :
     - les champs range déclarés dans SEARCH_FIELDS
     - leurs bornes en années (_start / _end, integer)
@@ -1036,9 +1040,6 @@ def build_filtered_temporal_metadata(
     Supprime :
     - les champs temporels bruts
     - les artefacts extensions.@context
-    - les bornes à l'année 0 : ce n'est pas une année historique mais la
-      marque d'une date sans année ("0000-11-21" dans un obituaire), qui
-      ferait descendre le minimum des facettes temporelles à 0
     - les bornes ISO qui ne sont pas des dates [-]AAAA-MM-JJ : avant son
       parser EDTF, Thunderdots renvoyait l'année seule pour une année <= 0
       ("-50"), qu'un champ date lirait comme des millisecondes depuis 1970 ;
@@ -1073,7 +1074,7 @@ def build_filtered_temporal_metadata(
                 year_path.removeprefix("temporal.")
             )
 
-            if year is not None and year != 0:
+            if year is not None:
                 allowed[year_path] = year
 
             iso = temporal_metadata.get(

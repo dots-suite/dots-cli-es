@@ -92,7 +92,7 @@ rpds-py==2026.6.3
     #   referencing
 six==1.17.0
     # via python-dateutil
-thunderdots==0.1.7
+thunderdots==0.1.8
     # via dots-es (pyproject.toml)
 typing-extensions==4.16.0
     # via
