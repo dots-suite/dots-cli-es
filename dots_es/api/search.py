@@ -484,7 +484,10 @@ def register_search_endpoint(
             {
                 "temporal.temporal.dublincore.created_start": {
                     "order": "asc",
-                    "missing": "_last"
+                    "missing": "_last",
+                    # An index where no document has this date (a corpus
+                    # without dc:created) would otherwise fail the search.
+                    "unmapped_type": "integer"
                 }
             },
             {"_score": "desc"}
