@@ -73,6 +73,7 @@ def parse_query_param(query_param: str, searchType: str = "notice"):
             "content": "content",
             "title": "title",
         },
+        # Same field as fulltext without content; required, or aliases fall back to resource-level notice
         "fragment_notice": {
             "title": "title",
         }
