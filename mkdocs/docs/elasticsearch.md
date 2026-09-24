@@ -49,7 +49,7 @@ the built-in `french` analyzer instead.
 
 ## `dots_document.conf.json`
 
-`"dynamic": "strict"` plus ten **dynamic templates**, which is what lets new metadata fields appear
+`"dynamic": "strict"`, `"date_detection": false` plus ten **dynamic templates**, which is what lets new metadata fields appear
 without a mapping change:
 
 | Template | Matches | Mapped as |
@@ -61,6 +61,13 @@ without a mapping change:
 | `fragment_temporal_dates`, `fragment_temporal_years`, `fragment_temporal_years_end`, `fragment_temporal_strings` | `fragment_temporal.*`, same suffixes | same as the `temporal_*` templates |
 | `resource_metadata_strings` | `resource_metadata.*` (string) | `text` / `folding`, `term_vector: with_positions_offsets`, sub-fields `keyword` and `sort` |
 | `fragment_metadata_strings` | `fragment_metadata.*` (string) | same as above |
+
+!!! warning "Why `date_detection` is off"
+    With date detection, Elasticsearch maps a new metadata field as `date` when its first value looks
+    like one (`1241-03`), before any dynamic template applies. Every later value that is not an ISO
+    date (`1160–1196`) then rejects its **whole document**: on the cartulaires, 2,029 fragments were
+    lost that way. Dates are indexed on purpose under `temporal` and `fragment_temporal`; every other
+    metadata string stays text. The same setting applies to `dots_collection`.
 
 Explicit properties include `resource_id`, `passage_id`, `citeType`, `path`, `path_ids`,
 `collection_facets` (keyword), `level` (integer), `title` and `content` (`text` / `folding`), the dynamic
