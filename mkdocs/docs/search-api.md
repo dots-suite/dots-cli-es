@@ -64,9 +64,11 @@ At fragment scope:
 
 - **temporal facets** are discovered under `fragment_temporal.*`, so their `start_field` /
   `end_field` point there and the front-end sends its ranges back on those fields;
-- **a date range excludes undated fragments.** At resource scope a document without the date passes
-  the filter (open range); at fragment scope most undated fragments are prefaces, tables or notices,
-  not undated acts;
+- **undated fragments are kept, after the dated ones.** As at resource scope, a date range is open:
+  a fragment without the date still matches, but each satisfied range adds to the score of dated
+  fragments, so undated ones come last among the fragments of a resource. Without a text query the
+  order is strict; with one, a very relevant undated fragment can still rank above a weakly
+  relevant dated one;
 - **`no-highlight`** searches the fragment's description instead of its text: `title`,
   `fragment_metadata.dublincore.title`, `fragment_metadata.extensions.name`. `content` still
   comes back through `no_match_size` as a preview;

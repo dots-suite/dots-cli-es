@@ -9,7 +9,6 @@ from dots_es.api.temporal import (
     get_temporal_fields,
     get_iso_temporal_fields,
     temporal_key,
-    build_range_clause,
     build_temporal_aggs,
     extract_temporal_facets,
     build_open_range,
@@ -370,11 +369,7 @@ def register_search_endpoint(
         if index is None or len(index) == 0:
             index = current_app.config["DOCUMENT_INDEX"]
 
-        # Level at which dates are filtered and faceted:
-        # - resource (default): the resource dates, repeated on each passage;
-        # - fragment: the fragment's own dates (fragment_temporal). Results
-        #   are then always resources grouped with their matching fragments,
-        #   and a date range excludes the fragments that have no date.
+        # Dates filtered and faceted: resource (temporal) or fragment (fragment_temporal)
         scope = request.args.get("scope") or "resource"
 
         if scope not in TEMPORAL_ROOTS:
@@ -891,17 +886,10 @@ def register_search_endpoint(
                     )
                 )
 
-                # Ajouter les ranges. At fragment scope a fragment without a
-                # date does not pass a date filter: most of them are prefaces,
-                # tables or notices, not undated acts.
+                # Undated documents stay in the results, scored below dated ones
                 if ranges:
-                    build_range = (
-                        build_range_clause
-                        if scope == "fragment"
-                        else build_open_range
-                    )
                     body_query["query"]["bool"]["must"].extend(
-                        [build_range(r) for r in ranges]
+                        [build_open_range(r) for r in ranges]
                     )
 
                 body_query["aggregations"]["filtered_resource_count"] = {
