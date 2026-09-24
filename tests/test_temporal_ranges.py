@@ -2,7 +2,6 @@ import pytest
 
 from dots_es.api.temporal import (
     foreign_range_fields,
-    scope_sort_field,
     build_open_range,
     build_range_clause,
     build_temporal_aggs,
@@ -127,11 +126,3 @@ def test_fragment_scope_rejects_resource_dates():
 
 def test_ranges_on_other_fields_are_not_scoped():
     assert foreign_range_fields([{"level": {"gte": "1"}}], "fragment") == []
-
-
-def test_date_sort_follows_the_scope():
-    resource_sort = "temporal.temporal.dublincore.created_start"
-
-    assert scope_sort_field(resource_sort, "resource") == resource_sort
-    assert scope_sort_field(resource_sort, "fragment") == f"fragment_{resource_sort}"
-    assert scope_sort_field("resource_metadata.dublincore.title.sort", "fragment") == "resource_metadata.dublincore.title.sort"

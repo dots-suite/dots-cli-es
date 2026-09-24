@@ -53,42 +53,50 @@ Both responses also carry `collection_indexed`, the `scope` used and a `duration
 
 ## Resource or fragment scope
 
-The `scope` parameter sets the level at which **dates** are filtered and faceted:
+Two parameters combine into four searches:
 
-| `scope` | Dates used | Results |
+- **`scope`** sets the level: the documents searched, the metadata and dates used to filter, facet
+  and sort, and the shape of the results;
+- **`no-highlight`** only sets what the query reads: the description (notice mode) or the text
+  (full-text mode).
+
+| | `scope=resource` (default) | `scope=fragment` |
 |---|---|---|
-| `resource` (default) | `temporal`: the dates of the resource, repeated on each of its passages. | As described above, depending on `no-highlight`. |
-| `fragment` | `fragment_temporal`: the fragment's own dates (see [Indexing](indexing.md#resource-and-fragment-metadata)). | Always grouped by resource (`buckets`), even with `no-highlight`. |
+| **Notice** (`no-highlight`) | Resource records (above). | Fragments, queried on `title`, `fragment_metadata.dublincore.title`, `fragment_metadata.extensions.name`. |
+| **Full-text** | Fragments grouped by resource (above). | Fragments, queried on `content` and `title`, highlighted. |
+| Metadata and dates | `resource_metadata`, `temporal` | `fragment_metadata`, `fragment_temporal` |
+| Results | `data` (notice) or `buckets` (full-text) | `data`: one item per fragment, never grouped |
+
+The two levels never mix. A resource search uses no fragment metadata or date, and a fragment search
+no resource metadata or date, whether for filtering, facets or sorting. The only resource data in a
+fragment search is the collection perimeter (`collectionId`, `collections` facet) and the resource
+title and path returned for display.
 
 At fragment scope:
 
+- **results** are a flat list, so sorting and pagination apply to fragments: `sort=dublinCore.date`
+  lists the acts from the oldest to the most recent, and `total_count` counts fragments. Each item
+  carries `passage_id`, `title`, `level`, `citeType`, `ancestors`, its `metadata`
+  (`fragment_metadata`), its unflattened `temporal`, `highlight.content`, and, for display,
+  `resource_id`, `resource_title` and `path`;
+- **the default sort** is the score, then the document order (`resource_id`, `passage_id`), which
+  also breaks ties after an explicit `sort`;
+- **metadata facets** are the same facets as at resource scope, read in `fragment_metadata` and
+  counting fragments; `facets={"dublinCore.language": ["lat"]}` filters on the fragment's language.
+  The `collections` facet also counts fragments;
 - **temporal facets** are discovered under `fragment_temporal.*`, so their `start_field` /
   `end_field` point there and the front-end sends its ranges back on those fields;
 - **undated fragments are kept, after the dated ones.** As at resource scope, a date range is open:
-  a fragment without the date still matches, but each satisfied range adds to the score of dated
-  fragments, so undated ones come last among the fragments of a resource. Without a text query the
-  order is strict; with one, a very relevant undated fragment can still rank above a weakly
-  relevant dated one;
-- **`no-highlight`** searches the fragment's description instead of its text: `title`,
-  `fragment_metadata.dublincore.title`, `fragment_metadata.extensions.name`. `content` still
-  comes back through `no_match_size` as a preview;
-- each fragment hit also carries its `metadata` (`fragment_metadata`) and its unflattened `temporal`;
-- fragments with equal scores keep their document order (`passage_id`).
+  a fragment without the date still matches, but each satisfied range adds to its score. Without a
+  text query the order is strict; with one, a very relevant undated fragment can still rank above a
+  weakly relevant dated one. An explicit `sort` replaces this order;
+- **notice mode** has no match in `content`: `highlight.content` holds its first 50 characters as a
+  preview (`no_match_size`).
 
-For example, a full-text search for `Blanche` restricted to 1241–1242 in the Maubuisson cartulary
-returns 63 fragments at resource scope (the cartulary covers 1204–1715) and only the charter of
-March 1241 at fragment scope.
-
-The two levels never mix: a resource search uses no fragment date, and a fragment search no
-resource date, whether for filtering, facets or sorting.
-
-- A `range[...]` on the dates of the other level (`fragment_temporal.*` at resource scope,
-  `temporal.*` at fragment scope) returns **HTTP 400**; the client resets its date ranges when the
-  scope changes.
-- At fragment scope the default sort is the score, and a date criterion in `sort`
-  (`sort=dublinCore.date`) sorts on the fragment date.
-
-An unknown `scope` returns **HTTP 400**.
+A `range[...]` on the dates of the other level (`fragment_temporal.*` at resource scope,
+`temporal.*` at fragment scope), a `sort` criterion that only exists for resources (`title`,
+`resource_metadata.*`) at fragment scope, and an unknown `scope` return **HTTP 400**. The client
+resets its date ranges and sort when the scope changes.
 
 ## Query parameters
 

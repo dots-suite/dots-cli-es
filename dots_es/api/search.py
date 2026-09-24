@@ -7,7 +7,6 @@ from flask import Response, request, current_app
 from dots_es.api.temporal import (
     TEMPORAL_ROOTS,
     foreign_range_fields,
-    scope_sort_field,
     get_temporal_fields,
     get_iso_temporal_fields,
     temporal_key,
@@ -21,11 +20,54 @@ from dots_es.api.search_fields import (
     build_searchfield_aggs,
     extract_searchfield_facets,
     get_facet_es_field,
-    resolve_sort_field
+    resolve_sort_field,
+    resolve_fragment_sort_field
 )
 
 # Hard ceiling on page[size], whatever the client asks or the configuration says.
 MAX_PAGE_SIZE = 200
+
+# Old unified config kept for reference:
+# "sentence" scanner starts at sentence start, often
+# leaving <mark> at the edge (median: 4 chars before
+# <mark> vs 20 with fvh).
+
+# highlight_config = {
+#     "type": "unified",
+#     "require_field_match": True,
+#     "pre_tags": ["<mark>"],
+#     "post_tags": ["</mark>"],
+#     "fields": {
+#         "content": {
+#             "fragment_size": 80,
+#             "number_of_fragments": 100,
+#             "boundary_scanner": "sentence",
+#             "no_match_size": 50
+#         }
+#     }
+# }
+
+# fvh: more balanced context around the term.
+# Requires "with_positions_offsets" term_vector on
+# content (set in dots_document.conf.json).
+# fragment_offset: context before the highlighted term (fvh only).
+# No boundary_scanner: with fvh, it can stretch fragments
+# far beyond fragment_size.
+
+HIGHLIGHT_CONFIG = {
+    "type": "fvh",
+    "require_field_match": True,
+    "pre_tags": ["<mark>"],
+    "post_tags": ["</mark>"],
+    "fields": {
+        "content": {
+            "fragment_size": 80,
+            "number_of_fragments": 100,
+            "fragment_offset": 25,
+            "no_match_size": 50
+        }
+    }
+}
 
 def build_collection_facet(scope_collection_id):
     return {
@@ -487,7 +529,6 @@ def register_search_endpoint(
 
         # Tri
 
-        # Fragment scope never sorts on resource dates
         default_sort = [
             {
                 "temporal.temporal.dublincore.created_start": {
@@ -498,7 +539,7 @@ def register_search_endpoint(
                 }
             },
             {"_score": "desc"}
-        ] if scope == "resource" else [{"_score": "desc"}]
+        ]
 
 
         sort_criteriae: list[dict] = []
@@ -514,8 +555,17 @@ def register_search_endpoint(
                 # Sort criteria mapped to sortable ES field
                 # ES `.sort` order accented chars with their based letters
                 # Dates are sorted against normalized temporal (start) bound, not the raw value
+                try:
+                    es_sort_field = (
+                        resolve_fragment_sort_field(criteria)
+                        if scope == "fragment"
+                        else resolve_sort_field(criteria)
+                    )
+                except ValueError as e:
+                    return Response(str(e), status=400)
+
                 sort_criteriae.append({
-                    scope_sort_field(resolve_sort_field(criteria), scope): {
+                    es_sort_field: {
                         "order": sort_order,
                         # Missing metadata pushed to the end of sorted results
                         "missing": "_last"
@@ -529,8 +579,177 @@ def register_search_endpoint(
 
         try:
 
+            # === CAS 3 : Fragment search, notice or full-text, one hit per fragment ===
+            # Only the fragment's own metadata and dates: no resource metadata or date
+            if scope == "fragment":
+                print('\nFRAGMENT SEARCH')
+
+                scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
+
+                body_query = {
+                    "query": {
+                        "bool": {
+                            "must": [{"term": {"type.keyword": "fragment"}}],
+                            "filter": [scope_filter]
+                        }
+                    },
+                    "_source": [
+                        "resource_id",
+                        "passage_id",
+                        "title",
+                        "level",
+                        "citeType",
+                        "ancestors",
+                        "path",
+                        "resource_metadata.title",
+                        "fragment_metadata",
+                        "fragment_temporal"
+                    ],
+                    # Notice mode: no match on content, no_match_size gives a preview
+                    "highlight": HIGHLIGHT_CONFIG,
+                    # Ties (no query, equal scores) keep the document order
+                    "sort": (sort_criteriae or [{"_score": "desc"}]) + [
+                        {"resource_id": "asc"},
+                        {"passage_id": "asc"}
+                    ],
+                    "from": (num_page - 1) * page_size,
+                    "size": page_size,
+                    "track_total_hits": True,
+                    "track_scores": True,
+                    "aggregations": build_searchfield_aggs(excluded_facets, scope)
+                }
+
+                query_type = "fragment_notice" if no_highlight else "fulltext"
+
+                if query_param:
+                    body_query["query"]["bool"]["must"].extend(parse_query_param(query_param, query_type))
+                else:
+                    body_query["query"]["bool"]["must"].append({"match_all": {}})
+
+                if filters_param:
+                    es_filters = parse_filters_param(filters_param)
+                    if es_filters:
+                        body_query["query"]["bool"]["filter"].extend(es_filters)
+
+                for facet_field, values in selected_facets.items():
+                    if not values:
+                        continue
+
+                    clause = build_facet_clause(
+                        get_facet_es_field(facet_field, scope),
+                        values,
+                        match_any=facet_field == "collections"
+                    )
+
+                    if facet_field != "collections":
+                        other_filters.append(clause)
+
+                    body_query["query"]["bool"]["filter"].append(clause)
+
+                base_must = body_query["query"]["bool"]["must"]
+                base_filters = body_query["query"]["bool"]["filter"]
+
+                if with_collections:
+                    # Counts fragments; the selected collections do not narrow their own facet
+                    body_query["aggregations"]["collections_fac"] = {
+                        "global": {},
+                        "aggs": {
+                            "filtered": {
+                                "filter": {
+                                    "bool": {
+                                        "must": list(base_must),
+                                        "filter": [scope_filter] + other_filters
+                                    }
+                                },
+                                "aggs": {
+                                    "values": {
+                                        "terms": {
+                                            "field": "collection_facets",
+                                            "size": 1000
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                body_query["aggregations"].update(
+                    build_temporal_aggs(
+                        temporal_fields,
+                        base_must,
+                        base_filters,
+                        ranges,
+                        iso_fields
+                    )
+                )
+
+                # Undated fragments stay in the results, scored below dated ones
+                if ranges:
+                    body_query["query"]["bool"]["must"].extend(
+                        [build_open_range(r) for r in ranges]
+                    )
+
+                search_result = current_app.elasticsearch.search(index=index, body=body_query)
+
+                results = []
+
+                for hit in search_result["hits"]["hits"]:
+                    source = hit["_source"]
+
+                    results.append({
+                        "resource_id": source.get("resource_id"),
+                        "resource_title": source.get("resource_metadata", {}).get("title"),
+                        "path": source.get("path"),
+                        "passage_id": source.get("passage_id"),
+                        "title": source.get("title"),
+                        "level": source.get("level", 1),
+                        "citeType": source.get("citeType"),
+                        "ancestors": source.get("ancestors", []),
+                        "metadata": source.get("fragment_metadata", {}),
+                        "temporal": unflatten_dict({
+                            key.removeprefix("temporal."): value
+                            for key, value in source.get("fragment_temporal", {}).items()
+                        }),
+                        "highlight": {
+                            "content": hit.get("highlight", {}).get("content") or []
+                        }
+                    })
+
+                facets = extract_searchfield_facets(
+                    search_result["aggregations"],
+                    excluded_facets,
+                    scope
+                )
+
+                if with_collections:
+                    facets["collections"] = []
+
+                    for bucket in search_result["aggregations"]["collections_fac"]["filtered"]["values"]["buckets"]:
+                        coll_id, _, label = bucket["key"].partition("###")
+
+                        facets["collections"].append({
+                            "id": coll_id,
+                            "label": label or coll_id,
+                            "count": bucket["doc_count"],
+                            "facet_key": bucket["key"]
+                        })
+
+                r = {
+                    "data": results,
+                    "total_count": search_result["hits"]["total"]["value"],
+                    "facets": facets,
+                    "page": num_page,
+                    "page_size": page_size,
+                    "highlight_patterns": patterns,
+                    "temporal": extract_temporal_facets(
+                        search_result["aggregations"],
+                        temporal_fields,
+                        iso_fields
+                    )
+                }
+
             # === CAS 1 : Recherche simple sur ressources filtrée par collection ===
-            if no_highlight and scope == "resource":
+            elif no_highlight:
                 print('\nRESOURCE SEARCH')
 
                 scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
@@ -702,72 +921,10 @@ def register_search_endpoint(
                 }
 
             # === CAS 2 : Full-text search grouped by resource using composite + top_hits ===
-            # Also serves every fragment-level search, notice mode included:
-            # the query then targets the fragment's description, not its text.
             else:
-                print('\nHIGHLIGHTS SEARCH', scope)
-
-                query_type = "fragment_notice" if no_highlight else "fulltext"
-
-                fragment_source = [
-                    "passage_id",
-                    "title",
-                    "level",
-                    "ancestors",
-                    "citeType"
-                ]
-
-                fragment_sort = [{"_score": "desc"}]
-
-                if scope == "fragment":
-                    fragment_source += ["fragment_metadata", "fragment_temporal"]
-                    # Equal scores (no query, filters only): keep the
-                    # fragments in document order.
-                    fragment_sort.append({"passage_id": "asc"})
+                print('\nHIGHLIGHTS SEARCH')
 
                 scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
-
-                # Old unified config kept for reference:
-                # "sentence" scanner starts at sentence start, often
-                # leaving <mark> at the edge (median: 4 chars before
-                # <mark> vs 20 with fvh).
-
-                # highlight_config = {
-                #     "type": "unified",
-                #     "require_field_match": True,
-                #     "pre_tags": ["<mark>"],
-                #     "post_tags": ["</mark>"],
-                #     "fields": {
-                #         "content": {
-                #             "fragment_size": 80,
-                #             "number_of_fragments": 100,
-                #             "boundary_scanner": "sentence",
-                #             "no_match_size": 50
-                #         }
-                #     }
-                # }
-
-                # fvh: more balanced context around the term.
-                # Requires "with_positions_offsets" term_vector on
-                # content (set in dots_document.conf.json).
-                # fragment_offset: context before the highlighted term (fvh only).
-                # No boundary_scanner: with fvh, it can stretch fragments
-                # far beyond fragment_size.
-
-                highlight_config = {
-                    "type": "fvh",
-                    "require_field_match": True,
-                    "pre_tags": ["<mark>"],
-                    "post_tags": ["</mark>"],
-                    "fields": {
-                        "content": {
-                            "fragment_size": 80,
-                            "number_of_fragments": 100,
-                            "fragment_offset": 25,
-                            "no_match_size": 50
-                        }
-                    }
-                }
 
                 body_query = {
                     "query": {
@@ -788,11 +945,16 @@ def register_search_endpoint(
                         "inner_hits": {
                             "name": "fragments",
                             "size": 100,
-                            "sort": fragment_sort,
-                            # 5 keys are used for fragments (highlight not linked to _source),
-                            # plus the fragment's own metadata and dates at fragment scope
-                            "_source": fragment_source,
-                            "highlight": highlight_config
+                            "sort": [{"_score": "desc"}],
+                            # 5 keys are used for fragments (highlight not linked to _source)
+                            "_source": [
+                                "passage_id",
+                                "title",
+                                "level",
+                                "ancestors",
+                                "citeType"
+                            ],
+                            "highlight": HIGHLIGHT_CONFIG
                         }
                     },
                     # tri par défaut = score ; sinon on préfixe avec les critères demandés
@@ -817,7 +979,7 @@ def register_search_endpoint(
                 )
 
                 if query_param:
-                    body_query["query"]["bool"]["must"].extend(parse_query_param(query_param, query_type))
+                    body_query["query"]["bool"]["must"].extend(parse_query_param(query_param, "fulltext"))
                 else:
                     body_query["query"]["bool"]["must"].append({"match_all": {}})
 
@@ -999,17 +1161,6 @@ def register_search_endpoint(
                                 "level": h["_source"].get("level", 1),
                                 "ancestors": h["_source"].get("ancestors", []),
                                 "citeType": h["_source"].get("citeType"),
-                                **(
-                                    {
-                                        "metadata": h["_source"].get("fragment_metadata", {}),
-                                        "temporal": unflatten_dict({
-                                            key.removeprefix("temporal."): value
-                                            for key, value in h["_source"].get("fragment_temporal", {}).items()
-                                        }),
-                                    }
-                                    if scope == "fragment"
-                                    else {}
-                                ),
                                 "highlight": {
                                     "content": [
                                         # add_ellipsis(frag) - no longer in use, see above

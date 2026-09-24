@@ -39,17 +39,6 @@ def foreign_range_fields(ranges: list[dict], scope: str) -> list[str]:
     ]
 
 
-def scope_sort_field(es_field: str, scope: str) -> str:
-    """
-    Sort field for the scope: a date criterion sorts on the dates of the
-    searched level (`temporal.x` -> `fragment_temporal.x` at fragment scope).
-    """
-    if scope == "fragment" and es_field.startswith("temporal."):
-        return f"{TEMPORAL_ROOTS['fragment']}.{es_field.removeprefix('temporal.')}"
-
-    return es_field
-
-
 @lru_cache(maxsize=16)
 def get_temporal_mapping(es, index: str, root: str = "temporal") -> dict:
     """

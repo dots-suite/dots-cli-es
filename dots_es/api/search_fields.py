@@ -745,7 +745,7 @@ def get_value(
 # Metadata facets helpers
 # ----------------------------------------------------------------------
 
-def build_searchfield_aggs(exclude_ids: set[str] | None = None):
+def build_searchfield_aggs(exclude_ids: set[str] | None = None, scope: str = "resource"):
     """
     Build the terms aggregations for the metadata facets.
 
@@ -753,17 +753,24 @@ def build_searchfield_aggs(exclude_ids: set[str] | None = None):
     (searchConfig.facets, entries with "enabled": false). This mirrors the
     front semantics: a facet missing from the config is still built.
     None / set() => historical behaviour.
+
+    scope: "resource" counts resources on resource_metadata; "fragment"
+    counts fragments on fragment_metadata.
     """
     aggs = {}
 
-    for field in SEARCH_FIELDS:
-        if not field.facet or field.is_range_facet:
-            continue
+    for field in facet_fields(exclude_ids, scope):
 
         if field.type != SearchFieldType.KEYWORD:
             continue
 
-        if matches_field(field, exclude_ids):
+        if scope == "fragment":
+            aggs[field.id] = {
+                "terms": {
+                    "field": f"{get_fragment_es_path(field)}.keyword",
+                    "size": 15000
+                }
+            }
             continue
 
         aggs[field.id] = {
@@ -782,6 +789,21 @@ def build_searchfield_aggs(exclude_ids: set[str] | None = None):
         }
 
     return aggs
+
+
+def facet_fields(exclude_ids: set[str] | None = None, scope: str = "resource"):
+    """
+    Metadata facets of the scope, excluded ones left out. A fragment only
+    carries Dublin Core and schema.org metadata.
+    """
+    return [
+        field
+        for field in SEARCH_FIELDS
+        if field.facet
+        and not field.is_range_facet
+        and not matches_field(field, exclude_ids)
+        and (scope == "resource" or get_fragment_es_path(field) is not None)
+    ]
 
 def range_field_by_es_path(es_path: str):
     """
@@ -834,7 +856,7 @@ def matches_field(field: SearchField, names) -> bool:
     return bool(names) and field.key in names
 
 
-def get_facet_es_field(facet_id):
+def get_facet_es_field(facet_id, scope: str = "resource"):
 
     # Facette spéciale collections
     if facet_id == "collections":
@@ -842,29 +864,29 @@ def get_facet_es_field(facet_id):
 
     field = resolve_field(facet_id)
 
-    if field is not None:
+    if field is not None and scope == "resource":
         return get_es_field(field)
 
+    fragment_path = get_fragment_es_path(field) if field is not None else None
+
+    if fragment_path is not None:
+        return f"{fragment_path}.keyword" if field.type == SearchFieldType.KEYWORD else fragment_path
+
     raise ValueError(
-        f"Unknown facet field {facet_id}"
+        f"Unknown facet field {facet_id} at {scope} scope"
     )
 
-def extract_searchfield_facets(aggregations, exclude_ids: set[str] | None = None):
+def extract_searchfield_facets(aggregations, exclude_ids: set[str] | None = None, scope: str = "resource"):
     """
     Extract the terms facets from the ES result.
 
-    exclude_ids must mirror the filtering passed to build_searchfield_aggs,
-    otherwise empty facets would be returned for the aggregations that were
-    never requested.
+    exclude_ids and scope must mirror the ones passed to
+    build_searchfield_aggs, otherwise empty facets would be returned for the
+    aggregations that were never requested.
     """
     facets = {}
 
-    for field in SEARCH_FIELDS:
-        if not field.facet or field.is_range_facet:
-            continue
-
-        if matches_field(field, exclude_ids):
-            continue
+    for field in facet_fields(exclude_ids, scope):
 
         buckets = aggregations.get(field.id, {}).get("buckets", [])
 
@@ -874,7 +896,8 @@ def extract_searchfield_facets(aggregations, exclude_ids: set[str] | None = None
         facets[field.key] = [
             {
                 "value": bucket["key"],
-                "count": bucket["resource_count"]["value"]
+                # Resources at resource scope, fragments at fragment scope
+                "count": bucket["resource_count"]["value"] if scope == "resource" else bucket["doc_count"]
             }
             for bucket in buckets
         ]
@@ -907,6 +930,17 @@ def get_es_path(field: SearchField) -> str:
         return f"resource_metadata.{field.path}"
 
     return field.path
+
+
+def get_fragment_es_path(field: SearchField) -> Optional[str]:
+    """
+    Path of the field in a fragment's own metadata, or None: a fragment only
+    carries Dublin Core and schema.org metadata (`fragment_metadata`).
+    """
+    if field.family in (SearchFieldFamily.DCT, SearchFieldFamily.SCHEMA):
+        return f"fragment_metadata.{field.path}"
+
+    return None
 
 
 def get_es_field(field: SearchField) -> str:
@@ -999,6 +1033,37 @@ def resolve_sort_field(criteria: str) -> str:
             return f"{base}.sort"
 
     return criteria
+
+
+def resolve_fragment_sort_field(criteria: str) -> str:
+    """
+    Sort criterion of a fragment search, on the fragment's own metadata and
+    dates only; a resource-only criterion raises ValueError.
+
+        dublinCore.date   -> fragment_temporal.temporal.dublincore.date_start
+        dublinCore.title  -> fragment_metadata.dublincore.title.sort
+    """
+    field = resolve_field(criteria)
+
+    if field is not None:
+        es_field = get_es_sort_field(field)
+
+        if es_field is not None and es_field.startswith("temporal."):
+            return f"fragment_{es_field}"
+
+        fragment_path = get_fragment_es_path(field)
+
+        if es_field is not None and fragment_path is not None:
+            return f"{fragment_path}.sort"
+
+    # Raw ES paths of the fragment level
+    if criteria.startswith("fragment_metadata.") and criteria.endswith(".keyword"):
+        return f"{criteria[: -len('.keyword')]}.sort"
+
+    if criteria.startswith(("fragment_metadata.", "fragment_temporal.")) or criteria in ("passage_id", "level"):
+        return criteria
+
+    raise ValueError(f"Sort criterion {criteria!r} is not available at fragment scope")
 
 
 # Signed years before year 0 in astronomical numbering ("-0500-01-01" is
