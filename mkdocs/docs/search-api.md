@@ -79,6 +79,15 @@ For example, a full-text search for `Blanche` restricted to 1241–1242 in the M
 returns 63 fragments at resource scope (the cartulary covers 1204–1715) and only the charter of
 March 1241 at fragment scope.
 
+The two levels never mix: a resource search uses no fragment date, and a fragment search no
+resource date, whether for filtering, facets or sorting.
+
+- A `range[...]` on the dates of the other level (`fragment_temporal.*` at resource scope,
+  `temporal.*` at fragment scope) returns **HTTP 400**; the client resets its date ranges when the
+  scope changes.
+- At fragment scope the default sort is the score, and a date criterion in `sort`
+  (`sort=dublinCore.date`) sorts on the fragment date.
+
 An unknown `scope` returns **HTTP 400**.
 
 ## Query parameters

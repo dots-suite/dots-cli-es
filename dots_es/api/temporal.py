@@ -20,6 +20,36 @@ TEMPORAL_ROOTS = {
 }
 
 
+def foreign_range_fields(ranges: list[dict], scope: str) -> list[str]:
+    """
+    Range fields on the dates of the other level: a resource search never
+    looks at fragment dates, and a fragment search never at resource dates.
+    """
+    foreign_roots = tuple(
+        f"{root}."
+        for other_scope, root in TEMPORAL_ROOTS.items()
+        if other_scope != scope
+    )
+
+    return [
+        field
+        for range_query in ranges
+        for field in range_query
+        if field.startswith(foreign_roots)
+    ]
+
+
+def scope_sort_field(es_field: str, scope: str) -> str:
+    """
+    Sort field for the scope: a date criterion sorts on the dates of the
+    searched level (`temporal.x` -> `fragment_temporal.x` at fragment scope).
+    """
+    if scope == "fragment" and es_field.startswith("temporal."):
+        return f"{TEMPORAL_ROOTS['fragment']}.{es_field.removeprefix('temporal.')}"
+
+    return es_field
+
+
 @lru_cache(maxsize=16)
 def get_temporal_mapping(es, index: str, root: str = "temporal") -> dict:
     """

@@ -1,6 +1,8 @@
 import pytest
 
 from dots_es.api.temporal import (
+    foreign_range_fields,
+    scope_sort_field,
     build_open_range,
     build_range_clause,
     build_temporal_aggs,
@@ -106,3 +108,30 @@ def test_facet_without_iso_dates_keeps_the_year_shape():
     [facet] = extract_temporal_facets(aggregations, [FIELD])
 
     assert "min_iso" not in facet and "start_field_iso" not in facet
+
+
+RESOURCE_FIELD = "temporal.temporal.dublincore.coverage"
+
+
+def test_resource_scope_rejects_fragment_dates():
+    ranges = [{f"{RESOURCE_FIELD}_start": {"lte": "1300"}}, {f"{FIELD}_end": {"gte": "1200"}}]
+
+    assert foreign_range_fields(ranges, "resource") == [f"{FIELD}_end"]
+
+
+def test_fragment_scope_rejects_resource_dates():
+    ranges = [{f"{RESOURCE_FIELD}_start": {"lte": "1300"}}, {f"{FIELD}_end": {"gte": "1200"}}]
+
+    assert foreign_range_fields(ranges, "fragment") == [f"{RESOURCE_FIELD}_start"]
+
+
+def test_ranges_on_other_fields_are_not_scoped():
+    assert foreign_range_fields([{"level": {"gte": "1"}}], "fragment") == []
+
+
+def test_date_sort_follows_the_scope():
+    resource_sort = "temporal.temporal.dublincore.created_start"
+
+    assert scope_sort_field(resource_sort, "resource") == resource_sort
+    assert scope_sort_field(resource_sort, "fragment") == f"fragment_{resource_sort}"
+    assert scope_sort_field("resource_metadata.dublincore.title.sort", "fragment") == "resource_metadata.dublincore.title.sort"

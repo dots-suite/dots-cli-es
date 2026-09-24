@@ -6,6 +6,8 @@ from flask import Response, request, current_app
 
 from dots_es.api.temporal import (
     TEMPORAL_ROOTS,
+    foreign_range_fields,
+    scope_sort_field,
     get_temporal_fields,
     get_iso_temporal_fields,
     temporal_key,
@@ -442,6 +444,15 @@ def register_search_endpoint(
         patterns = extract_highlight_patterns(query_param)
 
         ranges: list[dict] = parse_range_parameter()
+
+        foreign_fields = foreign_range_fields(ranges, scope)
+
+        if foreign_fields:
+            return Response(
+                f"Range on {', '.join(foreign_fields)} not allowed at {scope} scope",
+                status=400
+            )
+
         filters_param = request.args.get("filters")
         collection_id: str = request.args.get("collectionId")
 
@@ -476,18 +487,18 @@ def register_search_endpoint(
 
         # Tri
 
+        # Fragment scope never sorts on resource dates
         default_sort = [
             {
                 "temporal.temporal.dublincore.created_start": {
                     "order": "asc",
                     "missing": "_last",
-                    # An index where no document has this date (a corpus
-                    # without dc:created) would otherwise fail the search.
+                    # No document with dc:created in the index: sort on score instead of failing
                     "unmapped_type": "integer"
                 }
             },
             {"_score": "desc"}
-        ]
+        ] if scope == "resource" else [{"_score": "desc"}]
 
 
         sort_criteriae: list[dict] = []
@@ -504,7 +515,7 @@ def register_search_endpoint(
                 # ES `.sort` order accented chars with their based letters
                 # Dates are sorted against normalized temporal (start) bound, not the raw value
                 sort_criteriae.append({
-                    resolve_sort_field(criteria): {
+                    scope_sort_field(resolve_sort_field(criteria), scope): {
                         "order": sort_order,
                         # Missing metadata pushed to the end of sorted results
                         "missing": "_last"
