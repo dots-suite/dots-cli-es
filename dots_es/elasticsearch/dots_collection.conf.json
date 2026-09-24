@@ -1,6 +1,7 @@
 {
   "mappings": {
     "dynamic": "strict",
+    "date_detection": false,
     "properties": {
       "id": { "type": "keyword" },
       "type": { "type": "keyword" },
