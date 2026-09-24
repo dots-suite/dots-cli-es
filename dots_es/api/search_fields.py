@@ -1001,12 +1001,14 @@ def resolve_sort_field(criteria: str) -> str:
     return criteria
 
 
-ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# Signed years before year 0 in astronomical numbering ("-0500-01-01" is
+# 501 BC), as ThunderDots writes them from its EDTF parser.
+ISO_DATE_RE = re.compile(r"-?\d{4}-\d{2}-\d{2}")
 
 
 def is_indexable_iso_date(value) -> bool:
     """
-    True for an AAAA-MM-JJ date that the `strict_date` format of the
+    True for a [-]AAAA-MM-JJ date that the `strict_date` format of the
     temporal mapping accepts, year 0 excluded.
     """
     return (
@@ -1037,9 +1039,11 @@ def build_filtered_temporal_metadata(
     - les bornes à l'année 0 : ce n'est pas une année historique mais la
       marque d'une date sans année ("0000-11-21" dans un obituaire), qui
       ferait descendre le minimum des facettes temporelles à 0
-    - les bornes ISO qui ne sont pas des dates AAAA-MM-JJ : pour une année
-      <= 0, Thunderdots renvoie l'année seule ("-50"), qu'un champ date
-      lirait sinon comme des millisecondes depuis 1970
+    - les bornes ISO qui ne sont pas des dates [-]AAAA-MM-JJ : avant son
+      parser EDTF, Thunderdots renvoyait l'année seule pour une année <= 0
+      ("-50"), qu'un champ date lirait comme des millisecondes depuis 1970 ;
+      les années de plus de 4 chiffres ("+170000002-01-01") que strict_date
+      refuse
     """
 
     allowed = {}

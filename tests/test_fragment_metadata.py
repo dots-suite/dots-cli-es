@@ -150,3 +150,31 @@ def test_non_iso_bounds_are_not_indexed_as_dates():
         "temporal.dublincore.coverage_end": 120,
         "temporal.dublincore.coverage_end_iso": "0120-12-31",
     }
+
+
+def test_negative_years_keep_their_iso_bounds():
+    # ThunderDots EDTF parser, "-0500/0499" (ENCPOS_1850_09).
+    temporal = {
+        "dublincore.coverage_start": -500,
+        "dublincore.coverage_start_iso": "-0500-01-01",
+        "dublincore.coverage_end": 499,
+        "dublincore.coverage_end_iso": "0499-12-31",
+    }
+
+    assert build_filtered_temporal_metadata(temporal) == {
+        "temporal.dublincore.coverage_start": -500,
+        "temporal.dublincore.coverage_start_iso": "-0500-01-01",
+        "temporal.dublincore.coverage_end": 499,
+        "temporal.dublincore.coverage_end_iso": "0499-12-31",
+    }
+
+
+def test_long_years_are_not_indexed_as_dates():
+    temporal = {
+        "dublincore.coverage_start": 170000002,
+        "dublincore.coverage_start_iso": "+170000002-01-01",
+    }
+
+    assert build_filtered_temporal_metadata(temporal) == {
+        "temporal.dublincore.coverage_start": 170000002,
+    }

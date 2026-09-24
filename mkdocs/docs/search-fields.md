@@ -70,11 +70,17 @@ whole month, a day that single day.
 
 Two kinds of bounds are dropped:
 
-- **year 0**: no such year exists in historical dating, and the value only appears for dates without
-  a year, such as `0000-11-21` in an obituary;
-- **ISO bounds that are not `YYYY-MM-DD` dates**: for years ≤ 0 ThunderDots returns the bare year
-  (`-50`). Under the default date format Elasticsearch would read it as epoch milliseconds
+- **year 0**: in ISO 8601 and EDTF `0000` is 1 BC, but in the DoTS corpora it only appears for dates
+  without a year, such as `0000-11-21` in an obituary, which would pull the minimum of the date
+  facets down to 0. The rule can go once those dates are encoded `XXXX-11-21`, which ThunderDots
+  leaves without bounds;
+- **ISO bounds that are not `[-]YYYY-MM-DD` dates**: before its EDTF parser, ThunderDots returned the
+  bare year for years ≤ 0 (`-50`); years beyond four digits (`+170000002-01-01`) are not accepted
+  either. Under the default date format Elasticsearch would read `-50` as epoch milliseconds
   (1969-12-31), and under `strict_date` it would reject the whole passage. The year bound is kept.
+
+Years before year 0 keep their ISO bounds, in astronomical numbering: `-0500/0499` is indexed as
+`-0500-01-01` / `0499-12-31` (`-0500` is 501 BC).
 
 !!! note "`DOTS` fields are declared but deliberately not indexed"
     The extension whitelist collects only fields whose family is `SCHEMA`, so the two `DOTS`
