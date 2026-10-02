@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 # Root of the temporal index searched at each level (`scope` parameter):
-# the resource dates are repeated on every passage under `temporal`, the
-# fragment's own dates live under `fragment_temporal`.
+# the resource dates live under `temporal` in RESOURCE_INDEX, the
+# fragment's own dates under `fragment_temporal` in DOCUMENT_INDEX.
 TEMPORAL_ROOTS = {
     "resource": "temporal",
     "fragment": "fragment_temporal",

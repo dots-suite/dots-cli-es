@@ -32,7 +32,7 @@ It ships two console scripts:
             │
             ▼
     ┌───────────────┐
-    │ Elasticsearch │   dots_document · dots_collection
+    │ Elasticsearch │   dots_document · dots_resources · dots_collection
     └───────────────┘
             │
             ▼
@@ -65,12 +65,13 @@ It ships two console scripts:
 
 ## What gets indexed
 
-Two indexes, both configured from JSON files shipped with the package (see
+Three indexes, all configured from JSON files shipped with the package (see
 [Elasticsearch mappings](elasticsearch.md)):
 
 | Index | Contents |
 |---|---|
-| `dots_document` | one document per **resource**, plus one document per **passage** (a TEI fragment, `_id = "{resource_id}::{passage_id}"`) |
+| `dots_document` | one document per **passage** (a TEI fragment, `_id = "{resource_id}::{passage_id}"`), carrying its own metadata and only the `resource_id` of its resource |
+| `dots_resources` | one document per **resource**, `_id = resource_id`, holding its metadata, dates and collections |
 | `dots_collection` | one document per **collection** of the DTS tree |
 
 Which metadata survives indexing is not arbitrary: it is declared once in a registry of

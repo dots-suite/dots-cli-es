@@ -52,6 +52,7 @@ def log_startup_config():
         f"dots-api configuration : config/{env_alias}.yml\n"
         f"  Elasticsearch : {flask_app.config.get('ELASTICSEARCH_URL')}\n"
         f"  documents     : {flask_app.config.get('DOCUMENT_INDEX')}\n"
+        f"  resources     : {flask_app.config.get('RESOURCE_INDEX')}\n"
         f"  collections   : {flask_app.config.get('COLLECTION_INDEX')}",
         flush=True
     )

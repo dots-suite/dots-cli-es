@@ -25,6 +25,7 @@ source:
 config:
   ELASTICSEARCH_URL: "http://localhost:9200"
   DOCUMENT_INDEX: "dots_document"
+  RESOURCE_INDEX: "dots_resources"
   COLLECTION_INDEX: "dots_collection"
 ```
 

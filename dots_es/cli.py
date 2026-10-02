@@ -39,7 +39,7 @@ class App:
         ) if self.config.get("ELASTICSEARCH_URL") else None
 
         # Combined indexes string for ES
-        self.all_indexes = f"{self.config['DOCUMENT_INDEX']},{self.config['COLLECTION_INDEX']}"
+        self.all_indexes = f"{self.config['DOCUMENT_INDEX']},{self.config['RESOURCE_INDEX']},{self.config['COLLECTION_INDEX']}"
 
         # Store excluded collections as lowercase for case-insensitive comparison
         self.excluded_collections = {c.lower() for c in self.config.get("ADDITIONAL_EXCLUDED_COLLECTIONS", [])}
@@ -1303,7 +1303,9 @@ def apply_collection_scope(doc: dict, scopes: dict) -> dict:
     if not scope:
         return doc
 
-    doc["collections"] = scope["collections"]
+    # Passages only carry the facet keys, the collections live on the resource
+    if "collections" in doc:
+        doc["collections"] = scope["collections"]
     doc["collection_facets"] = scope["collection_facets"]
 
     return doc
@@ -1325,7 +1327,7 @@ async def index_resource_passages_async(
     collection_id = collection_metadata["id"]
 
     print("index_resource_passages (fragments mode)", resource_id)
-    print("index used for resource indexation", app.config["DOCUMENT_INDEX"])
+    print("index used for resource indexation", app.config["RESOURCE_INDEX"])
 
     fragments = resource_metadata.get("fragments") or []
 
@@ -1361,20 +1363,8 @@ async def index_resource_passages_async(
                 "path": resource_metadata.get("path"),
                 "path_ids": resource_metadata.get("path_ids"),
                 "ancestors": [],
-                "collections": [{
-                    "collection_id": collection_metadata["id"],
-                    "collection_title": collection_metadata["title"],
-                    "path": collection_metadata["path"],
-                    "path_ids": collection_metadata["path_ids"],
-                    "level": collection_metadata["level"],
-                    "dublincore": collection_metadata.get("dublincore", {}),
-                }],
-                "collection_facets": build_collection_facets(collection_metadata),
-                "resource_metadata": sanitize_resource_metadata(
-                    resource_metadata
-                ),
-                "temporal": temporal
-                #10juillet "resource_metadata": sanitize_resource_metadata(resource_metadata),
+                # Resource metadata, dates and collections live in RESOURCE_INDEX only
+                "collection_facets": build_collection_facets(collection_metadata)
             }
 
             passages.append(document_passage)
@@ -1421,28 +1411,16 @@ async def index_resource_passages_async(
                 "title": fragment.get("head"),
                 "content": text,
                 "fragment_metadata": extract_fragment_metadata(fragment),
-                # Dates of the fragment itself; "temporal" below stays the
-                # resource's. ThunderDots never copies one into the other.
+                # Dates of the fragment itself; the resource's stay on the
+                # resource document. ThunderDots never copies one into the other.
                 "fragment_temporal": build_filtered_temporal_metadata(
                     fragment.get("temporal") or {}
                 ),
                 "path": resource_metadata.get("path"),
                 "path_ids": resource_metadata.get("path_ids"),
                 "ancestors": ancestors,
-                "collections": [{
-                    "collection_id": collection_metadata["id"],
-                    "collection_title": collection_metadata["title"],
-                    "path": collection_metadata["path"],
-                    "path_ids": collection_metadata["path_ids"],
-                    "level": collection_metadata["level"],
-                    "dublincore": collection_metadata.get("dublincore", {}),
-                }],
-                "collection_facets": build_collection_facets(collection_metadata),
-                "resource_metadata": sanitize_resource_metadata(
-                    resource_metadata
-                ),
-                #10juillet "resource_metadata": sanitize_resource_metadata(resource_metadata),
-                "temporal": temporal
+                # Resource metadata, dates and collections live in RESOURCE_INDEX only
+                "collection_facets": build_collection_facets(collection_metadata)
             }
 
             passages.append(document_passage)
@@ -2657,7 +2635,7 @@ def make_cli():
             - Écriture des fichiers JSONL
             - Indexation Elasticsearch via index_jsonl()
                 - passages (DOCUMENT_INDEX)
-                - documents (DOCUMENT_INDEX)
+                - documents (RESOURCE_INDEX)
                 - collections (COLLECTION_INDEX)
             - Optionally, limit indexing to specific collections with --collections.
         """
@@ -2666,6 +2644,7 @@ def make_cli():
         app = cli_ctx.app
         es = app.elasticsearch
         doc_index = app.config["DOCUMENT_INDEX"]
+        resource_index = app.config["RESOURCE_INDEX"]
         coll_index = app.config["COLLECTION_INDEX"]
 
         MERGE_COLLECTIONS_SCRIPT = """
@@ -2690,6 +2669,7 @@ def make_cli():
         print('index collections:', collections)
         print('index _index_name:', app.config['COLLECTION_INDEX'])
         print('index _index_name:', app.config['DOCUMENT_INDEX'])
+        print('index _index_name:', app.config['RESOURCE_INDEX'])
         try:
             _index_name = app.config['COLLECTION_INDEX']
             asyncio.run(dotsplorer(
@@ -2704,7 +2684,7 @@ def make_cli():
 
         # Indexation ES
         # try:
-        for index_name in (doc_index, coll_index):
+        for index_name in (doc_index, resource_index, coll_index):
             if not es.indices.exists(index=index_name):
                 print(f"⚠️ Index {index_name} not found → creating with correct mapping")
                 # Appel positionnel correct pour update_conf
@@ -2825,7 +2805,7 @@ def make_cli():
 
                         apply_collection_scope(doc, collection_scopes)
                         app.elasticsearch.index(
-                            index=app.config["DOCUMENT_INDEX"],
+                            index=app.config["RESOURCE_INDEX"],
                             id=doc["resource_metadata"]["id"],
                             body=doc
                         )

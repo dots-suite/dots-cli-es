@@ -379,6 +379,77 @@ def build_facet_clause(es_field: str, values: list, match_any: bool = False) -> 
     }
 
 
+# Prefixes of the fields stored on resources (RESOURCE_INDEX), not on fragments
+RESOURCE_FIELD_PREFIXES = ("resource_metadata.", "temporal.", "collections.", "collection_facets")
+
+# Page size of the composite aggregation listing the resources hit by fragments
+RESOURCE_HITS_PAGE = 10000
+
+
+def is_resource_filter(clause: dict) -> bool:
+    """
+    True when a `filters` clause targets a resource field rather than a fragment field.
+    """
+    fields = clause.get("query_string", {}).get("fields", [])
+
+    return any(field.startswith(RESOURCE_FIELD_PREFIXES) for field in fields)
+
+
+def collect_resource_hits(index: str, fragment_query: dict) -> dict:
+    """
+    Resources having fragments that match: {resource_id: (fragment count, best fragment score)}.
+
+    Paged with a composite aggregation, so the number of resources is not capped.
+    """
+    hits = {}
+    composite = {
+        "size": RESOURCE_HITS_PAGE,
+        "sources": [{"resource_id": {"terms": {"field": "resource_id"}}}]
+    }
+
+    while True:
+        result = current_app.elasticsearch.search(index=index, body={
+            "size": 0,
+            "query": fragment_query,
+            "aggregations": {
+                "resources": {
+                    "composite": composite,
+                    "aggs": {"score": {"max": {"script": "_score"}}}
+                }
+            }
+        })
+
+        aggregation = result["aggregations"]["resources"]
+
+        for bucket in aggregation["buckets"]:
+            hits[bucket["key"]["resource_id"]] = (bucket["doc_count"], bucket["score"]["value"])
+
+        if len(aggregation["buckets"]) < RESOURCE_HITS_PAGE or "after_key" not in aggregation:
+            return hits
+
+        composite = {**composite, "after": aggregation["after_key"]}
+
+
+def get_resource_titles(resource_index: str, resource_ids) -> dict:
+    """
+    Titles of the given resources, read from RESOURCE_INDEX.
+    """
+    if not resource_ids:
+        return {}
+
+    result = current_app.elasticsearch.mget(
+        index=resource_index,
+        ids=list(resource_ids),
+        source=["resource_metadata.title"]
+    )
+
+    return {
+        doc["_id"]: doc["_source"].get("resource_metadata", {}).get("title")
+        for doc in result["docs"]
+        if doc.get("found")
+    }
+
+
 def is_collection_indexed(index: str, collection_id: str) -> bool:
     """
     Check if there is at least one resource indexed for the scope collection
@@ -413,6 +484,9 @@ def register_search_endpoint(
         if index is None or len(index) == 0:
             index = current_app.config["DOCUMENT_INDEX"]
 
+        # Resource metadata and dates are only stored in their own index
+        resource_index: str = request.args.get("resourceIndex") or current_app.config["RESOURCE_INDEX"]
+
         # Dates filtered and faceted: resource (temporal) or fragment (fragment_temporal)
         scope = request.args.get("scope") or "resource"
 
@@ -424,15 +498,18 @@ def register_search_endpoint(
 
         temporal_root = TEMPORAL_ROOTS[scope]
 
+        # Resource dates are mapped in RESOURCE_INDEX, fragment dates in the fragment index
+        temporal_index = index if scope == "fragment" else resource_index
+
         temporal_fields = get_temporal_fields(
             current_app.elasticsearch,
-            index,
+            temporal_index,
             temporal_root
         )
 
         iso_fields = get_iso_temporal_fields(
             current_app.elasticsearch,
-            index,
+            temporal_index,
             temporal_root
         )
 
@@ -584,7 +661,8 @@ def register_search_endpoint(
             if scope == "fragment":
                 print('\nFRAGMENT SEARCH')
 
-                scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
+                # A fragment carries the path of its resource
+                scope_filter = {"term": {"path_ids": collection_id}}
 
                 body_query = {
                     "query": {
@@ -601,7 +679,6 @@ def register_search_endpoint(
                         "citeType",
                         "ancestors",
                         "path",
-                        "resource_metadata.title",
                         "fragment_metadata",
                         "fragment_temporal"
                     ],
@@ -691,6 +768,11 @@ def register_search_endpoint(
 
                 search_result = current_app.elasticsearch.search(index=index, body=body_query)
 
+                resource_titles = get_resource_titles(
+                    resource_index,
+                    {hit["_source"].get("resource_id") for hit in search_result["hits"]["hits"]}
+                )
+
                 results = []
 
                 for hit in search_result["hits"]["hits"]:
@@ -698,7 +780,7 @@ def register_search_endpoint(
 
                     results.append({
                         "resource_id": source.get("resource_id"),
-                        "resource_title": source.get("resource_metadata", {}).get("title"),
+                        "resource_title": resource_titles.get(source.get("resource_id")),
                         "path": source.get("path"),
                         "passage_id": source.get("passage_id"),
                         "title": source.get("title"),
@@ -852,7 +934,7 @@ def register_search_endpoint(
                         [build_open_range(r) for r in ranges]
                     )
 
-                search_result = current_app.elasticsearch.search(index=index, body=body_query)
+                search_result = current_app.elasticsearch.search(index=resource_index, body=body_query)
                 print('\nbody_query')
                 print(body_query)
 
@@ -920,105 +1002,112 @@ def register_search_endpoint(
                     "temporal": temporal_facets
                 }
 
-            # === CAS 2 : Full-text search grouped by resource using composite + top_hits ===
+            # === CAS 2 : Full-text search grouped by resource ===
+            # Fragments only carry resource_id: the text query runs on the
+            # fragments, facets, filters, sort and pagination on RESOURCE_INDEX
             else:
                 print('\nHIGHLIGHTS SEARCH')
 
-                scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
+                fragment_query = {
+                    "bool": {
+                        "must": [{"term": {"type.keyword": "fragment"}}] + (
+                            parse_query_param(query_param, "fulltext")
+                            if query_param
+                            else [{"match_all": {}}]
+                        ),
+                        # The scope is applied to the fragments only: a resource with
+                        # several parents keeps the branch its fragments were indexed with
+                        "filter": [{"term": {"path_ids": collection_id}}]
+                    }
+                }
 
+                resource_filters = []
+
+                if filters_param:
+                    for clause in parse_filters_param(filters_param):
+                        if is_resource_filter(clause):
+                            resource_filters.append(clause)
+                        else:
+                            fragment_query["bool"]["filter"].append(clause)
+
+                for facet_field, values in selected_facets.items():
+                    if not values:
+                        continue
+
+                    clause = build_facet_clause(
+                        get_facet_es_field(facet_field),
+                        values,
+                        match_any=facet_field == "collections"
+                    )
+
+                    if facet_field == "collections":
+                        collection_filters.append(clause)
+                    else:
+                        other_filters.append(clause)
+
+                    resource_filters.append(clause)
+
+                # 1. Resources having matching fragments
+                resource_hits = collect_resource_hits(index, fragment_query)
+                hit_ids = {"ids": {"values": list(resource_hits)}}
+
+                # 2. Resources: facets, sort and pagination
                 body_query = {
                     "query": {
-                        "bool": {
-                            "must": [{"term": {"type.keyword": "fragment"}}],
-                            "filter": [scope_filter]
+                        # Relevance of a resource = score of its best fragment, as with collapse
+                        "script_score": {
+                            "query": {
+                                "bool": {
+                                    "filter": [hit_ids] + resource_filters,
+                                    # Undated resources stay in the results, scored below dated ones
+                                    "must": [build_open_range(r) for r in ranges]
+                                }
+                            },
+                            "script": {
+                                "source": "params.scores[doc['resource_id'].value] + _score",
+                                "params": {
+                                    "scores": {rid: score for rid, (_, score) in resource_hits.items()}
+                                }
+                            }
                         }
                     },
-                    # 4 fields of top-hit fragment are used for writing buckets :
                     "_source": [
                         "resource_id",
                         "resource_metadata",
                         "temporal",
                         "collections"
                     ],
-                    "collapse": {
-                        "field": "resource_id",
-                        "inner_hits": {
-                            "name": "fragments",
-                            "size": 100,
-                            "sort": [{"_score": "desc"}],
-                            # 5 keys are used for fragments (highlight not linked to _source)
-                            "_source": [
-                                "passage_id",
-                                "title",
-                                "level",
-                                "ancestors",
-                                "citeType"
-                            ],
-                            "highlight": HIGHLIGHT_CONFIG
-                        }
-                    },
-                    # tri par défaut = score ; sinon on préfixe avec les critères demandés
+                    # tri par défaut = date puis score ; sinon les critères demandés
                     "sort": sort_criteriae if sort_criteriae else default_sort,
                     "from": (num_page - 1) * page_size,
                     "size": page_size,
                     "track_total_hits": True,
                     "track_scores": True,
-
                     "aggregations": {
-                        "resource_count": {
-                            "cardinality": {
-                                "field": "resource_id",
-                                "precision_threshold": 1
+                        # Fragments of the resources kept by the filters
+                        "fragment_count": {
+                            "sum": {
+                                "script": {
+                                    "source": "params.counts[doc['resource_id'].value]",
+                                    "params": {
+                                        "counts": {rid: count for rid, (count, _) in resource_hits.items()}
+                                    }
+                                }
                             }
                         },
+                        **build_searchfield_aggs(excluded_facets)
                     }
                 }
 
-                body_query["aggregations"].update(
-                    build_searchfield_aggs(excluded_facets)
-                )
-
-                if query_param:
-                    body_query["query"]["bool"]["must"].extend(parse_query_param(query_param, "fulltext"))
-                else:
-                    body_query["query"]["bool"]["must"].append({"match_all": {}})
-
-                if filters_param:
-                    es_filters = parse_filters_param(filters_param)
-                    if es_filters:
-                        body_query["query"]["bool"].setdefault("filter", []).extend(es_filters)
-
-                if selected_facets:
-                    for facet_field, values in selected_facets.items():
-                        if not values:
-                            continue
-
-                        es_field = get_facet_es_field(facet_field)
-
-                        clause = build_facet_clause(
-                            es_field,
-                            values,
-                            match_any=facet_field == "collections"
-                        )
-
-                        if facet_field == "collections":
-                            collection_filters.append(clause)
-                            body_query["query"]["bool"].setdefault("filter", []).append(clause)
-                        else:
-                            other_filters.append(clause)
-                            body_query["query"]["bool"].setdefault("filter", []).append(clause)
-
-                coll_agg = {
-                    "collections": {
+                if with_collections:
+                    # The selected collections do not narrow their own facet
+                    body_query["aggregations"]["collections"] = {
                         "global": {},
                         "aggs": {
                             "filtered": {
                                 "filter": {
                                     "bool": {
-                                        "must": [
-                                            m for m in body_query["query"]["bool"]["must"]
-                                        ],
-                                        "filter": [scope_filter] + other_filters
+                                        "filter": [hit_ids] + other_filters
                                     }
                                 },
                                 "aggs": {
@@ -1026,68 +1115,62 @@ def register_search_endpoint(
                                         "terms": {
                                             "field": "collection_facets",
                                             "size": 1000
-                                        },
-                                        "aggs": {
-                                            "resource_count": {
-                                                "cardinality": {
-                                                    "field": "resource_id",
-                                                    "precision_threshold": 1
-                                                }
-                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                print("coll_agg filter:", coll_agg["collections"]["aggs"]["filtered"]["filter"]["bool"]["filter"])
-
-                base_must = body_query["query"]["bool"]["must"]
-                base_filters = body_query["query"]["bool"]["filter"]
-
-                if with_collections:
-                    body_query["aggregations"].update(coll_agg)
 
                 body_query["aggregations"].update(
                     build_temporal_aggs(
                         temporal_fields,
-                        base_must,
-                        base_filters,
+                        [],
+                        [hit_ids] + resource_filters,
                         ranges,
                         iso_fields
                     )
                 )
 
-                # Undated documents stay in the results, scored below dated ones
-                if ranges:
-                    body_query["query"]["bool"]["must"].extend(
-                        [build_open_range(r) for r in ranges]
-                    )
+                search_result = current_app.elasticsearch.search(index=resource_index, body=body_query)
 
-                body_query["aggregations"]["filtered_resource_count"] = {
-                    "filter": {
-                        "bool": {
-                            "must": body_query["query"]["bool"]["must"],
-                            "filter": (
-                                    other_filters +
-                                    collection_filters
-                            )
-                        }
-                    },
-                    "aggs": {
-                        "count": {
-                            "cardinality": {
-                                "field": "resource_id",
-                                "precision_threshold": 15000
+                # 3. Highlighted fragments of the page's resources
+                page_ids = [hit["_source"]["resource_id"] for hit in search_result["hits"]["hits"]]
+                fragments_by_resource = {}
+
+                if page_ids:
+                    fragment_result = current_app.elasticsearch.search(index=index, body={
+                        "query": {
+                            "bool": {
+                                "must": fragment_query["bool"]["must"],
+                                "filter": fragment_query["bool"]["filter"] + [{"terms": {"resource_id": page_ids}}]
                             }
-                        }
-                    }
-                }
+                        },
+                        "_source": ["resource_id"],
+                        "collapse": {
+                            "field": "resource_id",
+                            "inner_hits": {
+                                "name": "fragments",
+                                "size": 100,
+                                "sort": [{"_score": "desc"}],
+                                # 5 keys are used for fragments (highlight not linked to _source)
+                                "_source": [
+                                    "passage_id",
+                                    "title",
+                                    "level",
+                                    "ancestors",
+                                    "citeType"
+                                ],
+                                "highlight": HIGHLIGHT_CONFIG
+                            }
+                        },
+                        "size": len(page_ids)
+                    })
 
-                print('\nbody : ', body_query)
-                search_result = current_app.elasticsearch.search(index=index, body=body_query)
-
+                    for hit in fragment_result["hits"]["hits"]:
+                        fragments_by_resource[hit["_source"]["resource_id"]] = (
+                            hit["inner_hits"]["fragments"]["hits"]["hits"]
+                        )
 
                 collection_facets = []
 
@@ -1108,7 +1191,7 @@ def register_search_endpoint(
                     collection_facets.append({
                         "id": coll_id,
                         "label": label,
-                        "count": bucket["resource_count"]["value"],
+                        "count": bucket["doc_count"],
                         "facet_key": bucket["key"]
                     })
 
@@ -1117,28 +1200,14 @@ def register_search_endpoint(
                         f for f in collection_facets if f["facet_key"] not in collection_facet
                     ]
 
-                # No longer used: fragment separator is now added in the front end
-                # (ResourcesList.vue). Kept just in case.
-
-                # def add_ellipsis(fragment):
-                #     if not fragment:
-                #         return fragment
-                #     text = fragment.strip()
-                #     if text and text[0].islower():
-                #         text = "..." + text
-                #     if not text.endswith((".", "…", "!", "?")):
-                #         text = text + "..."
-                #     return text
-
                 grouped_results = []
 
                 for hit in search_result["hits"]["hits"]:
-                    inner_hits_list = hit["inner_hits"]["fragments"]["hits"]["hits"]
+                    rep_source = hit["_source"]
+                    inner_hits_list = fragments_by_resource.get(rep_source.get("resource_id"))
                     if not inner_hits_list:
                         continue
 
-                    # le hit top-level EST déjà un fragment représentatif de la ressource
-                    rep_source = hit["_source"]
                     resource_metadata = rep_source.get("resource_metadata", {})
                     temporal_metadata = rep_source.get("temporal", {})
 
@@ -1162,11 +1231,7 @@ def register_search_endpoint(
                                 "ancestors": h["_source"].get("ancestors", []),
                                 "citeType": h["_source"].get("citeType"),
                                 "highlight": {
-                                    "content": [
-                                        # add_ellipsis(frag) - no longer in use, see above
-                                        frag
-                                        for frag in (h.get("highlight", {}).get("content") or [])
-                                    ]
+                                    "content": h.get("highlight", {}).get("content") or []
                                 }
                             }
                             for h in inner_hits_list
@@ -1192,8 +1257,8 @@ def register_search_endpoint(
                 r = {
                     "buckets": grouped_results,
                     "facets": facets,
-                    "bucket_count": search_result["aggregations"]["filtered_resource_count"]["count"]["value"],
-                    "total_count": search_result["hits"]["total"]["value"],
+                    "bucket_count": search_result["hits"]["total"]["value"],
+                    "total_count": int(search_result["aggregations"]["fragment_count"]["value"]),
                     "page": num_page,
                     "page_size": page_size,
                     "highlight_patterns": patterns,
@@ -1203,7 +1268,7 @@ def register_search_endpoint(
             # Collection index check common to 3 possible responses:
             # None when no collection_id has been provided, which is irrelevant
             r["collection_indexed"] = (
-                is_collection_indexed(index, collection_id)
+                is_collection_indexed(resource_index, collection_id)
                 if collection_id
                 else None
             )

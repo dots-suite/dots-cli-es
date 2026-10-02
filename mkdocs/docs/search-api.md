@@ -31,10 +31,16 @@ The `no-highlight` parameter is a **mode switch**:
 
 === "Full-text mode (default)"
 
-    `no-highlight` absent. Queries fragments (`type.keyword == "fragment"`), collapses results by
-    `resource_id` with `inner_hits` named `fragments`, and highlights `content` with the **`fvh`**
-    highlighter (`<mark>` tags, `fragment_size: 80`, `number_of_fragments: 100`,
-    `fragment_offset: 25`, `no_match_size: 50`).
+    `no-highlight` absent. Runs in three requests, since passages only carry the `resource_id` of
+    their resource:
+
+    1. the text query on the passages lists the matching resources, with their number of matching
+       passages and the score of their best passage (composite aggregation, not capped);
+    2. `RESOURCE_INDEX` applies the facets, filters and date ranges to these resources, counts the
+       facets, sorts and paginates; a resource scores as its best passage;
+    3. the passages of the page's resources are collapsed by `resource_id` with `inner_hits` named
+       `fragments`, and `content` is highlighted with the **`fvh`** highlighter (`<mark>` tags,
+       `fragment_size: 80`, `number_of_fragments: 100`, `fragment_offset: 25`, `no_match_size: 50`).
 
     Response: `{buckets, facets, bucket_count, total_count, page, page_size, highlight_patterns, temporal}`.
 
@@ -102,7 +108,8 @@ resets its date ranges and sort when the scope changes.
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `index` | `DOCUMENT_INDEX` | Target Elasticsearch index. |
+| `index` | `DOCUMENT_INDEX` | Elasticsearch index of the passages. |
+| `resourceIndex` | `RESOURCE_INDEX` | Elasticsearch index of the resources. |
 | `query` | `match_all` | Supports exact phrases, `AND`/`OR`/`NOT`, `*` and `?` wildcards, and `field:value` with aliases. Default operator is `AND`, wildcards are analyzed. The available field aliases differ between the two modes. |
 | `no-highlight` | absent | Mode switch, see above. |
 | `scope` | `resource` | `resource` or `fragment`, see [above](#resource-or-fragment-scope). |
@@ -169,8 +176,9 @@ This matches the acts of March 1241, and also an act dated only "1241", whose ye
 ## Facets
 
 Facet aggregations are generated from the [search field registry](search-fields.md): one `terms`
-aggregation per non-range `KEYWORD` field declared with `facet=True`, each with a `cardinality`
-sub-aggregation on `resource_id` so that **counts are per resource, not per fragment**.
+aggregation per non-range `KEYWORD` field declared with `facet=True`. At resource scope it runs on
+`RESOURCE_INDEX`, one document per resource, so its `doc_count` is the **exact number of resources**;
+at fragment scope it counts fragments.
 
 Buckets are computed under the field `id` and republished to clients under the canonical `key`
 (`dct:creator` → `dublinCore.creator`).

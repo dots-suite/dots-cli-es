@@ -4,8 +4,8 @@
     "date_detection": false,
     "dynamic_templates": [
       {
-        "fragment_temporal_dates": {
-          "path_match": "fragment_temporal.*_iso",
+        "temporal_dates": {
+          "path_match": "temporal.*_iso",
           "mapping": {
             "type": "date",
             "format": "strict_date"
@@ -13,8 +13,8 @@
         }
       },
       {
-        "fragment_temporal_years": {
-          "path_match": "fragment_temporal.*_start",
+        "temporal_years": {
+          "path_match": "temporal.*_start",
           "match_mapping_type": "long",
           "mapping": {
             "type": "integer"
@@ -22,8 +22,8 @@
         }
       },
       {
-        "fragment_temporal_years_end": {
-          "path_match": "fragment_temporal.*_end",
+        "temporal_years_end": {
+          "path_match": "temporal.*_end",
           "match_mapping_type": "long",
           "mapping": {
             "type": "integer"
@@ -31,8 +31,8 @@
         }
       },
       {
-        "fragment_temporal_strings": {
-          "path_match": "fragment_temporal.*",
+        "temporal_strings": {
+          "path_match": "temporal.*",
           "match_mapping_type": "string",
           "mapping": {
             "type": "keyword"
@@ -40,8 +40,8 @@
         }
       },
       {
-        "fragment_metadata_strings": {
-          "path_match": "fragment_metadata.*",
+        "resource_metadata_strings": {
+          "path_match": "resource_metadata.*",
           "match_mapping_type": "string",
           "mapping": {
             "type": "text",
@@ -78,56 +78,32 @@
         "type": "keyword"
       },
 
-      "passage_id": {
-        "type": "keyword"
-      },
-
-      "citeType": {
-        "type": "keyword"
-      },
-
       "level": {
         "type": "integer"
       },
 
-      "title": {
-        "type": "text",
-        "analyzer": "folding",
-        "term_vector": "with_positions_offsets"
-      },
-
-      "content": {
-        "type": "text",
-        "analyzer": "folding",
-        "term_vector": "with_positions_offsets"
-      },
-
-      "path": {
-        "type": "keyword"
-      },
-
-      "path_ids": {
-        "type": "keyword"
-      },
-
-      "ancestors": {
+      "collections": {
         "type": "nested",
         "properties": {
-          "id": { "type": "keyword" },
+          "collection_id": { "type": "keyword" },
+          "collection_title": { "type": "keyword" },
+          "path": { "type": "keyword" },
+          "path_ids": { "type": "keyword" },
           "level": { "type": "integer" },
-          "citeType": { "type": "keyword" },
-          "title": { "type": "keyword" }
+          "dublincore": {
+            "type": "object",
+            "dynamic": true
+          }
         }
       },
-
       "collection_facets": {
         "type": "keyword"
       },
-      "fragment_metadata": {
+      "resource_metadata": {
         "type": "object",
         "dynamic": true
       },
-      "fragment_temporal": {
+      "temporal": {
         "type": "object",
         "dynamic": true
       }

@@ -106,7 +106,7 @@ year must be written `XXXX-MM-DD`; `0000-MM-DD` is a day of 1 BC.
 |---|---|
 | `get_es_path` | Prefixes `resource_metadata.` for `DCT`/`SCHEMA`/`DOTS`; other families use `path` verbatim. |
 | `get_es_field` | Appends `.keyword` for `KEYWORD` fields. |
-| `build_searchfield_aggs` | One `terms` aggregation per non-range `KEYWORD` facet, named after `field.id`, with a nested `cardinality` sub-aggregation on `resource_id` so counts are **per resource**, not per fragment. |
+| `build_searchfield_aggs` | One `terms` aggregation per non-range `KEYWORD` facet, named after `field.id`. At resource scope it runs on `RESOURCE_INDEX`, one document per resource, so `doc_count` is an exact count **per resource**. |
 | `extract_searchfield_facets` | Reads buckets by `field.id` and republishes them under `field.key`. |
 | `get_es_sort_field` / `resolve_sort_field` | `TEMPORAL` sorts on `temporal.{range_start}`; text, keyword and URL fields sort on the `.sort` sub-field (normalizer `sortable`), never on `.keyword`. |
 

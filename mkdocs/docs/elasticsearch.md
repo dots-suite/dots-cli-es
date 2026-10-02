@@ -1,16 +1,17 @@
 # Elasticsearch mappings
 
-Three JSON files shipped with the package define how the indexes are built:
+Four JSON files shipped with the package define how the indexes are built:
 
 ```
 dots_es/elasticsearch/
-├── _global.conf.json          # settings, applied to both indexes
+├── _global.conf.json          # settings, applied to every index
 ├── dots_collection.conf.json  # mappings for the collections index
-└── dots_document.conf.json    # mappings for the resources + passages index
+├── dots_document.conf.json    # mappings for the passages index
+└── dots_resources.conf.json   # mappings for the resources index
 ```
 
 !!! warning "File name must equal index name"
-    `update-conf` looks for `{index_name}.conf.json`. If you rename `DOCUMENT_INDEX` in the YAML
+    `update-conf` looks for `{index_name}.conf.json`. If you rename `DOCUMENT_INDEX` or `RESOURCE_INDEX` in the YAML
     without renaming the JSON file accordingly, the command prints *"conf not found"* and moves on —
     the index is created with no mapping at all.
 
@@ -49,18 +50,16 @@ the built-in `french` analyzer instead.
 
 ## `dots_document.conf.json`
 
-`"dynamic": "strict"`, `"date_detection": false` plus ten **dynamic templates**, which is what lets new metadata fields appear
+`"dynamic": "strict"`, `"date_detection": false` plus five **dynamic templates**, which is what lets new metadata fields appear
 without a mapping change:
 
 | Template | Matches | Mapped as |
 |---|---|---|
-| `temporal_dates` | `temporal.*_iso` | `date`, format `strict_date` (`YYYY-MM-DD` only) |
-| `temporal_years` | `temporal.*_start` | `integer` |
-| `temporal_years_end` | `temporal.*_end` | `integer` |
-| `temporal_strings` | `temporal.*` (string) | `keyword` |
-| `fragment_temporal_dates`, `fragment_temporal_years`, `fragment_temporal_years_end`, `fragment_temporal_strings` | `fragment_temporal.*`, same suffixes | same as the `temporal_*` templates |
-| `resource_metadata_strings` | `resource_metadata.*` (string) | `text` / `folding`, `term_vector: with_positions_offsets`, sub-fields `keyword` and `sort` |
-| `fragment_metadata_strings` | `fragment_metadata.*` (string) | same as above |
+| `fragment_temporal_dates` | `fragment_temporal.*_iso` | `date`, format `strict_date` (`YYYY-MM-DD` only) |
+| `fragment_temporal_years` | `fragment_temporal.*_start` | `integer` |
+| `fragment_temporal_years_end` | `fragment_temporal.*_end` | `integer` |
+| `fragment_temporal_strings` | `fragment_temporal.*` (string) | `keyword` |
+| `fragment_metadata_strings` | `fragment_metadata.*` (string) | `text` / `folding`, `term_vector: with_positions_offsets`, sub-fields `keyword` and `sort` |
 
 !!! warning "Why `date_detection` is off"
     With date detection, Elasticsearch maps a new metadata field as `date` when its first value looks
@@ -71,8 +70,17 @@ without a mapping change:
 
 Explicit properties include `resource_id`, `passage_id`, `citeType`, `path`, `path_ids`,
 `collection_facets` (keyword), `level` (integer), `title` and `content` (`text` / `folding`), the dynamic
-objects `resource_metadata`, `fragment_metadata`, `temporal` and `fragment_temporal`, plus two
-**nested** objects: `ancestors` and `collections`.
+objects `fragment_metadata` and `fragment_temporal`, plus the **nested** object `ancestors`.
+A passage stores no resource metadata: it is looked up in `dots_resources` through `resource_id`.
+
+## `dots_resources.conf.json`
+
+Same settings, one document per resource. Its five dynamic templates are the resource-level
+counterparts of the ones above: `temporal_dates`, `temporal_years`, `temporal_years_end` and
+`temporal_strings` on `temporal.*`, and `resource_metadata_strings` on `resource_metadata.*`.
+
+Explicit properties: `type`, `resource_id`, `level`, `collection_facets`, the dynamic objects
+`resource_metadata` and `temporal`, and the **nested** object `collections`.
 
 !!! warning "New top-level fields need a mapping change"
     Because the root is `strict`, a document carrying a top-level field that the conf does not

@@ -26,11 +26,21 @@ def test_fragment_facets_are_published_with_fragment_counts():
     assert facets["dublinCore.language"] == [{"value": "lat", "count": 436}]
 
 
-def test_resource_facets_are_unchanged():
+def test_resource_facets_count_resource_documents():
+    # One document per resource in RESOURCE_INDEX: doc_count is exact, no cardinality
     aggs = build_searchfield_aggs()
 
-    assert aggs["dct:language"]["terms"]["field"] == "resource_metadata.dublincore.language.keyword"
-    assert "resource_count" in aggs["dct:language"]["aggs"]
+    assert aggs["dct:language"] == {
+        "terms": {"field": "resource_metadata.dublincore.language.keyword", "size": 15000}
+    }
+
+
+def test_resource_facets_are_published_with_resource_counts():
+    aggregations = {"dct:language": {"buckets": [{"key": "fr", "doc_count": 3131}]}}
+
+    facets = extract_searchfield_facets(aggregations)
+
+    assert facets["dublinCore.language"] == [{"value": "fr", "count": 3131}]
 
 
 def test_fragment_facet_filter():

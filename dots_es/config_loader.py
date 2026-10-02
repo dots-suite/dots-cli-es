@@ -98,6 +98,9 @@ def load_config(alias: str = "staging") -> dict:
     flat_config.update(config.get("source", {}))
     flat_config.update(config.get("config", {}))
 
+    # Resources live in their own index; older YAML files do not name it
+    flat_config.setdefault("RESOURCE_INDEX", "dots_resources")
+
     # Ensure ADDITIONAL_EXCLUDED_COLLECTIONS exists and is a lowercase set
     flat_config["ADDITIONAL_EXCLUDED_COLLECTIONS"] = set(
         c.lower() for c in flat_config.get("ADDITIONAL_EXCLUDED_COLLECTIONS", [])

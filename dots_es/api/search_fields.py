@@ -754,8 +754,9 @@ def build_searchfield_aggs(exclude_ids: set[str] | None = None, scope: str = "re
     front semantics: a facet missing from the config is still built.
     None / set() => historical behaviour.
 
-    scope: "resource" counts resources on resource_metadata; "fragment"
-    counts fragments on fragment_metadata.
+    scope: "resource" counts resources on resource_metadata, one document
+    per resource in RESOURCE_INDEX; "fragment" counts fragments on
+    fragment_metadata.
     """
     aggs = {}
 
@@ -764,27 +765,16 @@ def build_searchfield_aggs(exclude_ids: set[str] | None = None, scope: str = "re
         if field.type != SearchFieldType.KEYWORD:
             continue
 
-        if scope == "fragment":
-            aggs[field.id] = {
-                "terms": {
-                    "field": f"{get_fragment_es_path(field)}.keyword",
-                    "size": 15000
-                }
-            }
-            continue
+        es_field = (
+            f"{get_fragment_es_path(field)}.keyword"
+            if scope == "fragment"
+            else get_es_field(field)
+        )
 
         aggs[field.id] = {
             "terms": {
-                "field": get_es_field(field),
+                "field": es_field,
                 "size": 15000
-            },
-            "aggs": {
-                "resource_count": {
-                    "cardinality": {
-                        "field": "resource_id",
-                        "precision_threshold": 15000
-                    }
-                }
             }
         }
 
@@ -897,7 +887,7 @@ def extract_searchfield_facets(aggregations, exclude_ids: set[str] | None = None
             {
                 "value": bucket["key"],
                 # Resources at resource scope, fragments at fragment scope
-                "count": bucket["resource_count"]["value"] if scope == "resource" else bucket["doc_count"]
+                "count": bucket["doc_count"]
             }
             for bucket in buckets
         ]
@@ -907,7 +897,7 @@ def extract_searchfield_facets(aggregations, exclude_ids: set[str] | None = None
 
 # Property families indexed under `resource_metadata`,
 # and therefore covered by the `resource_metadata.*`
-# dynamic template from `dots_document.conf.json`.
+# dynamic template from `dots_resources.conf.json`.
 METADATA_FAMILIES = (
     SearchFieldFamily.DCT,
     SearchFieldFamily.SCHEMA,
@@ -915,8 +905,8 @@ METADATA_FAMILIES = (
 )
 
 
-# Sortable property families. Sorting always applies to Resources, whether
-# queried directly or rebuilt by collapsing fragments. Their properties,
+# Sortable property families. Sorting always applies to Resources, queried
+# in RESOURCE_INDEX for notice and full-text searches alike. Their properties,
 # including DTS fields, are indexed under `resource_metadata`.
 # The root `title` belongs to the fragment, not the Resource: never sorted on
 SORTABLE_FAMILIES = METADATA_FAMILIES + (SearchFieldFamily.DTS,)
