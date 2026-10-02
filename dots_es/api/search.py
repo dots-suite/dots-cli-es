@@ -450,6 +450,20 @@ def get_resource_titles(resource_index: str, resource_ids) -> dict:
     }
 
 
+def build_scope_filter(collection_id: str) -> dict:
+    """
+    Restrict a search to a collection subtree.
+
+    `collection_facets` holds every branch of a resource with several parents,
+    `path_ids` only the branch it was indexed with last: a play filed under both
+    "moliere" and "comedie" must be found from either.
+    """
+    if not collection_id:
+        return {"match_all": {}}
+
+    return {"prefix": {"collection_facets": f"{collection_id}###"}}
+
+
 def is_collection_indexed(index: str, collection_id: str) -> bool:
     """
     Check if there is at least one resource indexed for the scope collection
@@ -459,11 +473,7 @@ def is_collection_indexed(index: str, collection_id: str) -> bool:
     result = current_app.elasticsearch.count(
         index=index,
         body={
-            "query": {
-                "term": {
-                    "resource_metadata.path_ids.keyword": collection_id
-                }
-            }
+            "query": build_scope_filter(collection_id)
         }
     )
 
@@ -661,8 +671,8 @@ def register_search_endpoint(
             if scope == "fragment":
                 print('\nFRAGMENT SEARCH')
 
-                # A fragment carries the path of its resource
-                scope_filter = {"term": {"path_ids": collection_id}}
+                # A fragment carries the collections of its resource
+                scope_filter = build_scope_filter(collection_id)
 
                 body_query = {
                     "query": {
@@ -834,7 +844,7 @@ def register_search_endpoint(
             elif no_highlight:
                 print('\nRESOURCE SEARCH')
 
-                scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
+                scope_filter = build_scope_filter(collection_id)
 
                 body_query = {
                     "query": {
@@ -1015,9 +1025,9 @@ def register_search_endpoint(
                             if query_param
                             else [{"match_all": {}}]
                         ),
-                        # The scope is applied to the fragments only: a resource with
-                        # several parents keeps the branch its fragments were indexed with
-                        "filter": [{"term": {"path_ids": collection_id}}]
+                        # A fragment carries the collections of its resource: the scope
+                        # needs no lookup in RESOURCE_INDEX
+                        "filter": [build_scope_filter(collection_id)]
                     }
                 }
 
