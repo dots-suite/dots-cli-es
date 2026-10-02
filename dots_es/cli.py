@@ -1294,6 +1294,29 @@ def collect_resource_collection_scopes(out_dir: str) -> dict:
     return scopes
 
 
+# Bounds of one bulk request, well under Elasticsearch http.max_content_length (100 MB)
+BULK_MAX_DOCS = 1000
+BULK_MAX_BYTES = 20_000_000
+
+
+def bulk_chunks(lines, max_docs: int = BULK_MAX_DOCS, max_bytes: int = BULK_MAX_BYTES):
+    """
+    Group JSONL lines into chunks small enough for one bulk request each.
+    """
+    chunk, size = [], 0
+
+    for line in lines:
+        if chunk and (len(chunk) >= max_docs or size + len(line) > max_bytes):
+            yield chunk
+            chunk, size = [], 0
+
+        chunk.append(line)
+        size += len(line)
+
+    if chunk:
+        yield chunk
+
+
 def apply_collection_scope(doc: dict, scopes: dict) -> dict:
     """
     Replace the single-branch collections of a document by their union.
@@ -2723,64 +2746,66 @@ def make_cli():
 
         passage_files = [f for f in all_files if f.endswith("_passages.jsonl")]
         for passage_file in passage_files:
-            bulk_actions = []
             path = os.path.join(out_dir, passage_file)
             with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        doc = json.loads(line)
-                        apply_collection_scope(doc, collection_scopes)
+                # One bulk request for a whole collection can exceed the ES request size limit
+                for lines in bulk_chunks(f):
+                    bulk_actions = []
+                    for line in lines:
+                        try:
+                            doc = json.loads(line)
+                            apply_collection_scope(doc, collection_scopes)
 
-                        bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
-                                                       "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
-                        bulk_actions.append(doc)
+                            bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
+                                                           "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
+                            bulk_actions.append(doc)
 
-                        # bulk_actions.append({
-                        #     "update": {
-                        #         "_index": app.config["DOCUMENT_INDEX"],
-                        #         "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'
-                        #     }
-                        # })
-                        #
-                        # bulk_actions.append({
-                        #     "scripted_upsert": True,
-                        #     "script": {
-                        #         "lang": "painless",
-                        #         "source": MERGE_COLLECTIONS_SCRIPT,
-                        #         "params": {
-                        #             "collections": doc.get("collections", [])
-                        #         }
-                        #     },
-                        #     "upsert": doc
-                        # })
-                    except Exception as e:
-                        report_passage_indexation_errors(
-                            app,
-                            resource_id=doc.get("resource_id", "*"),
-                            passage_id=doc.get("passage_id", "*"),
-                            error=e
-                        )
-            if bulk_actions:
-                try:
-                    response = app.elasticsearch.bulk(body=bulk_actions, refresh=False)
-                except Exception as e:
-                    report_passage_indexation_errors(app, resource_id="*", passage_id="*", error=e)
-                else:
-                    if response.get("errors"):
-                        for item in response.get("items", []):
-                            action = item.get("index", {})
-                            if "error" in action:
-                                es_id = action.get("_id", "")
-                                passage_id = es_id.split("::", 1)[1] if "::" in es_id else es_id
-                                resource_id = es_id.split("::", 1)[0] if "::" in es_id else "*"
-                                report_passage_indexation_errors(
-                                    app,
-                                    resource_id=resource_id,
-                                    passage_id=passage_id,
-                                    error=Exception(action["error"].get("reason", "ES bulk error"))
-                                )
-                        app.index_stats["bulk_es_errors"] += 1
-            app.index_stats["passages_indexed"] = app.index_stats.get("passages_indexed", 0) + len(bulk_actions) // 2
+                            # bulk_actions.append({
+                            #     "update": {
+                            #         "_index": app.config["DOCUMENT_INDEX"],
+                            #         "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'
+                            #     }
+                            # })
+                            #
+                            # bulk_actions.append({
+                            #     "scripted_upsert": True,
+                            #     "script": {
+                            #         "lang": "painless",
+                            #         "source": MERGE_COLLECTIONS_SCRIPT,
+                            #         "params": {
+                            #             "collections": doc.get("collections", [])
+                            #         }
+                            #     },
+                            #     "upsert": doc
+                            # })
+                        except Exception as e:
+                            report_passage_indexation_errors(
+                                app,
+                                resource_id=doc.get("resource_id", "*"),
+                                passage_id=doc.get("passage_id", "*"),
+                                error=e
+                            )
+                    if bulk_actions:
+                        try:
+                            response = app.elasticsearch.bulk(body=bulk_actions, refresh=False)
+                        except Exception as e:
+                            report_passage_indexation_errors(app, resource_id="*", passage_id="*", error=e)
+                        else:
+                            if response.get("errors"):
+                                for item in response.get("items", []):
+                                    action = item.get("index", {})
+                                    if "error" in action:
+                                        es_id = action.get("_id", "")
+                                        passage_id = es_id.split("::", 1)[1] if "::" in es_id else es_id
+                                        resource_id = es_id.split("::", 1)[0] if "::" in es_id else "*"
+                                        report_passage_indexation_errors(
+                                            app,
+                                            resource_id=resource_id,
+                                            passage_id=passage_id,
+                                            error=Exception(action["error"].get("reason", "ES bulk error"))
+                                        )
+                                app.index_stats["bulk_es_errors"] += 1
+                    app.index_stats["passages_indexed"] = app.index_stats.get("passages_indexed", 0) + len(bulk_actions) // 2
 
         end_fragments_indexation = time.perf_counter()
 
