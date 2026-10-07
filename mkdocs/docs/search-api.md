@@ -104,6 +104,27 @@ A `range[...]` on the dates of the other level (`fragment_temporal.*` at resourc
 `resource_metadata.*`) at fragment scope, and an unknown `scope` return **HTTP 400**. The client
 resets its date ranges and sort when the scope changes.
 
+### Granularity
+
+At fragment scope, `citeType` restricts the results to one or more fragment types
+(`citeType=acte`, `citeType=article`; comma-separated for several). It is refused at resource scope
+(**HTTP 400**).
+
+Every response carries `granularities`, the fragment types of the collection (`collectionId`) with
+their number of fragments, whatever the query and filters: the levels a client can offer.
+
+```json
+"granularities": [{"citeType": "acte", "count": 12288}, {"citeType": "part", "count": 266}]
+```
+
+### Grouping by sub-collection or resource
+
+Fragment results are a flat list. To display them grouped, sort on `path` first:
+`sort=path,dublinCore.date`. `path` is the path of the fragment's resource
+(`Root > Sub-collection > Resource`), so the fragments of a sub-collection, then of a resource, come
+together across pages; each result carries `path` and `path_ids` to build the group headers.
+`resource_id` is also accepted as a sort criterion.
+
 ## Query parameters
 
 | Parameter | Default | Effect |
@@ -115,8 +136,9 @@ resets its date ranges and sort when the scope changes.
 | `scope` | `resource` | `resource` or `fragment`, see [above](#resource-or-fragment-scope). |
 | `collectionId` | none | Scopes the search to a collection subtree; also drives `collection_indexed` in the response. |
 | `collections` | none | `[a,b]` list of collection keys to **remove** from the returned collection facets. |
-| `facets` | none | JSON object `{canonical_key: [values]}` of selected facet values. `collections` uses OR logic; every other facet uses AND. |
-| `excludeFacets` <sup>*</sup> | none | Comma-separated canonical keys not to compute or return. `collections` is a valid value. |
+| `facets` | none | JSON object `{canonical_key: [values]}` of selected facet values. `collections` and `resources` use OR logic; every other facet uses AND. |
+| `citeType` | none | Fragment types listed at fragment scope, see [Granularity](#granularity). |
+| `excludeFacets` <sup>*</sup> | none | Comma-separated canonical keys not to compute or return. `collections` and `resources` are valid values. |
 | `excludeTemporalFacets` <sup>*</sup> | none | Same, for temporal range facets. |
 | `range[<field>]` | none | Repeated-key syntax, e.g. `range[temporal.temporal.dublincore.created_start]=gte:1200,lte:1300`. Operators: `gt`, `gte`, `lt`, `lte`. See [Date ranges](#date-ranges). |
 | `filters` | none | `field:value1\|value2,field2:value3` — one clause per comma, values within a field joined with `OR`. Each clause becomes a `query_string` restricted to that field. |
@@ -182,6 +204,17 @@ at fragment scope it counts fragments.
 
 Buckets are computed under the field `id` and republished to clients under the canonical `key`
 (`dct:creator` → `dublinCore.creator`).
+
+Two facets do not come from the registry and filter with OR logic:
+
+- **`collections`**: the collections of the results, keyed `id###title`;
+- **`resources`**: the resources of the results, keyed `id###title` too (`MAUB-AB-01###Cartulaire de
+  l’abbaye de Maubuisson, première partie`), with their title read from `RESOURCE_INDEX`. It counts
+  resources in notice mode and fragments otherwise (the matching fragments of each resource in
+  full-text mode). Selecting a value filters on its `resource_id`. The first 1,000 resources are
+  listed.
+
+Neither narrows its own values when a value is selected, so the other values stay available.
 
 ## Sorting
 

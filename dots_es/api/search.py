@@ -424,6 +424,83 @@ def get_resource_titles(resource_index: str, resource_ids) -> dict:
     }
 
 
+# Facet of the resources: values "id###title", like the collections facet
+RESOURCES_FACET = "resources"
+RESOURCES_FACET_SIZE = 1000
+
+GRANULARITIES_SIZE = 100
+
+
+def build_resource_facet_clause(values) -> dict:
+    """
+    Filter on the selected resources ("id###title" facet keys): any of them.
+    """
+    return {"terms": {"resource_id": [value.partition("###")[0] for value in values]}}
+
+
+def build_resources_facet_agg(must: list, filters: list) -> dict:
+    """
+    Resources facet, counted on the documents of the searched index (resources or fragments).
+    """
+    return {
+        "global": {},
+        "aggs": {
+            "filtered": {
+                "filter": {"bool": {"must": must, "filter": filters}},
+                "aggs": {
+                    "values": {
+                        "terms": {"field": "resource_id", "size": RESOURCES_FACET_SIZE}
+                    }
+                }
+            }
+        }
+    }
+
+
+def extract_resources_facet(aggregations: dict, resource_index: str) -> list:
+    """
+    Resources facet values with their titles, read from RESOURCE_INDEX.
+    """
+    buckets = aggregations["resources_fac"]["filtered"]["values"]["buckets"]
+    titles = get_resource_titles(resource_index, [bucket["key"] for bucket in buckets])
+
+    values = []
+
+    for bucket in buckets:
+        label = titles.get(bucket["key"]) or bucket["key"]
+
+        values.append({
+            "id": bucket["key"],
+            "label": label,
+            "count": bucket["doc_count"],
+            "facet_key": f"{bucket['key']}###{label}"
+        })
+
+    return values
+
+
+def get_granularities(index: str, collection_id: str) -> list:
+    """
+    Fragment types (citeType) of the collection, the levels a fragment search can list.
+    """
+    result = current_app.elasticsearch.search(index=index, body={
+        "size": 0,
+        "query": {
+            "bool": {
+                "filter": [{"term": {"type.keyword": "fragment"}}, build_scope_filter(collection_id)]
+            }
+        },
+        "aggregations": {
+            "cite_types": {"terms": {"field": "citeType", "size": GRANULARITIES_SIZE}}
+        }
+    })
+
+    return [
+        {"citeType": bucket["key"], "count": bucket["doc_count"]}
+        for bucket in result["aggregations"]["cite_types"]["buckets"]
+    ]
+
+
 def build_scope_filter(collection_id: str) -> dict:
     """
     Restrict a search to a collection subtree.
@@ -546,6 +623,15 @@ def register_search_endpoint(
         # its own aggregation (global + terms), built further down.
         with_collections = "collections" not in excluded_facets
 
+        # Same for the "resources" facet
+        with_resources = RESOURCES_FACET not in excluded_facets
+
+        # Fragment types listed by a fragment search (granularity), e.g. "acte"
+        cite_types = [c.strip() for c in (request.args.get("citeType") or "").split(",") if c.strip()]
+
+        if cite_types and scope != "fragment":
+            return Response("citeType requires scope=fragment", status=400)
+
         query_param: str = request.args.get("query", None)
         patterns = extract_highlight_patterns(query_param)
 
@@ -639,6 +725,7 @@ def register_search_endpoint(
         r = {}
 
         collection_filters = []
+        resource_facet_filters = []
         other_filters = []
 
         try:
@@ -666,6 +753,7 @@ def register_search_endpoint(
                         "citeType",
                         "ancestors",
                         "path",
+                        "path_ids",
                         "fragment_metadata",
                         "fragment_temporal"
                     ],
@@ -690,6 +778,10 @@ def register_search_endpoint(
                 else:
                     body_query["query"]["bool"]["must"].append({"match_all": {}})
 
+                # Granularity: only the fragments of the requested types
+                level_filters = [{"terms": {"citeType": cite_types}}] if cite_types else []
+                body_query["query"]["bool"]["filter"].extend(level_filters)
+
                 if filters_param:
                     es_filters = parse_filters_param(filters_param)
                     if es_filters:
@@ -699,19 +791,32 @@ def register_search_endpoint(
                     if not values:
                         continue
 
-                    clause = build_facet_clause(
-                        get_facet_es_field(facet_field, scope),
-                        values,
-                        match_any=facet_field == "collections"
-                    )
+                    if facet_field == RESOURCES_FACET:
+                        clause = build_resource_facet_clause(values)
+                        resource_facet_filters.append(clause)
+                    else:
+                        clause = build_facet_clause(
+                            get_facet_es_field(facet_field, scope),
+                            values,
+                            match_any=facet_field == "collections"
+                        )
 
-                    if facet_field != "collections":
-                        other_filters.append(clause)
+                        if facet_field == "collections":
+                            collection_filters.append(clause)
+                        else:
+                            other_filters.append(clause)
 
                     body_query["query"]["bool"]["filter"].append(clause)
 
                 base_must = body_query["query"]["bool"]["must"]
                 base_filters = body_query["query"]["bool"]["filter"]
+
+                if with_resources:
+                    # Counts fragments; the selected resources do not narrow their own facet
+                    body_query["aggregations"]["resources_fac"] = build_resources_facet_agg(
+                        list(base_must),
+                        [scope_filter] + level_filters + other_filters + collection_filters
+                    )
 
                 if with_collections:
                     # Counts fragments; the selected collections do not narrow their own facet
@@ -722,7 +827,7 @@ def register_search_endpoint(
                                 "filter": {
                                     "bool": {
                                         "must": list(base_must),
-                                        "filter": [scope_filter] + other_filters
+                                        "filter": [scope_filter] + level_filters + other_filters + resource_facet_filters
                                     }
                                 },
                                 "aggs": {
@@ -769,6 +874,7 @@ def register_search_endpoint(
                         "resource_id": source.get("resource_id"),
                         "resource_title": resource_titles.get(source.get("resource_id")),
                         "path": source.get("path"),
+                        "path_ids": source.get("path_ids", []),
                         "passage_id": source.get("passage_id"),
                         "title": source.get("title"),
                         "level": source.get("level", 1),
@@ -789,6 +895,9 @@ def register_search_endpoint(
                     excluded_facets,
                     scope
                 )
+
+                if with_resources:
+                    facets[RESOURCES_FACET] = extract_resources_facet(search_result["aggregations"], resource_index)
 
                 if with_collections:
                     facets["collections"] = []
@@ -863,6 +972,12 @@ def register_search_endpoint(
                         if not values:
                             continue
 
+                        if facet_field == RESOURCES_FACET:
+                            clause = build_resource_facet_clause(values)
+                            resource_facet_filters.append(clause)
+                            body_query["query"]["bool"].setdefault("filter", []).append(clause)
+                            continue
+
                         es_field = get_facet_es_field(facet_field)
                         clause = build_facet_clause(
                             es_field,
@@ -885,7 +1000,7 @@ def register_search_endpoint(
                                 "filter": {
                                     "bool": {
                                         "must": body_query["query"]["bool"]["must"],
-                                        "filter": [scope_filter] + other_filters
+                                        "filter": [scope_filter] + other_filters + resource_facet_filters
                                     }
                                 },
                                 "aggs": {
@@ -905,6 +1020,13 @@ def register_search_endpoint(
 
                 if with_collections:
                     body_query["aggregations"].update(coll_agg)
+
+                if with_resources:
+                    # The selected resources do not narrow their own facet
+                    body_query["aggregations"]["resources_fac"] = build_resources_facet_agg(
+                        body_query["query"]["bool"]["must"],
+                        [scope_filter] + other_filters + collection_filters
+                    )
 
                 body_query["aggregations"].update(
                     build_temporal_aggs(
@@ -981,6 +1103,9 @@ def register_search_endpoint(
                 if with_collections:
                     facets["collections"] = collection_facets
 
+                if with_resources:
+                    facets[RESOURCES_FACET] = extract_resources_facet(search_result["aggregations"], resource_index)
+
                 r = {
                     "data": results,
                     "total_count": search_result["hits"]["total"]["value"],
@@ -1019,6 +1144,12 @@ def register_search_endpoint(
 
                 for facet_field, values in selected_facets.items():
                     if not values:
+                        continue
+
+                    if facet_field == RESOURCES_FACET:
+                        clause = build_resource_facet_clause(values)
+                        resource_facet_filters.append(clause)
+                        resource_filters.append(clause)
                         continue
 
                     clause = build_facet_clause(
@@ -1094,7 +1225,7 @@ def register_search_endpoint(
                             "filtered": {
                                 "filter": {
                                     "bool": {
-                                        "filter": [hit_ids] + other_filters
+                                        "filter": [hit_ids] + other_filters + resource_facet_filters
                                     }
                                 },
                                 "aggs": {
@@ -1108,6 +1239,13 @@ def register_search_endpoint(
                             }
                         }
                     }
+
+                if with_resources:
+                    # The selected resources do not narrow their own facet
+                    body_query["aggregations"]["resources_fac"] = build_resources_facet_agg(
+                        [],
+                        [hit_ids] + other_filters + collection_filters
+                    )
 
                 body_query["aggregations"].update(
                     build_temporal_aggs(
@@ -1241,6 +1379,13 @@ def register_search_endpoint(
                 if with_collections:
                     facets["collections"] = collection_facets
 
+                if with_resources:
+                    # A resource counts its matching fragments, not itself
+                    facets[RESOURCES_FACET] = [
+                        {**value, "count": resource_hits.get(value["id"], (value["count"], None))[0]}
+                        for value in extract_resources_facet(search_result["aggregations"], resource_index)
+                    ]
+
                 r = {
                     "buckets": grouped_results,
                     "facets": facets,
@@ -1261,6 +1406,7 @@ def register_search_endpoint(
             )
 
             r["scope"] = scope
+            r["granularities"] = get_granularities(index, collection_id)
             r["duration"] = float('%.4f' % (time.time() - start_time))
 
         except Exception as e:

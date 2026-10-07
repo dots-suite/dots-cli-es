@@ -44,7 +44,13 @@ def test_fragment_metadata_follows_search_fields_contract():
     metadata = extract_fragment_metadata(CARTULAIRE_FRAGMENT)
 
     assert metadata == {
-        "dublincore": {"date": "1241-03", "language": "lat", "title": "1 (Mars 1241)"},
+        "dublincore": {
+            "bibliographicCitation": "Cartulaire de l’abbaye de Maubuisson, p. 1-2.",
+            "date": "1241-03",
+            "language": "lat",
+            "title": "1 (Mars 1241)",
+            "type": "act",
+        },
         "extensions": {"dateCreated": "1241-03", "inLanguage": "lat", "name": "1 (Mars 1241)"},
     }
 

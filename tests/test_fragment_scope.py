@@ -1,5 +1,7 @@
 import pytest
 
+from dots_es.api.search import build_resource_facet_clause
+
 from dots_es.api.search_fields import (
     build_searchfield_aggs,
     extract_searchfield_facets,
@@ -54,6 +56,9 @@ def test_fragment_facet_filter():
     ("extensions.dateCreated", "fragment_temporal.temporal.extensions.dateCreated_start"),
     ("fragment_metadata.dublincore.type.keyword", "fragment_metadata.dublincore.type.sort"),
     ("passage_id", "passage_id"),
+    ("path", "path"),
+    ("resource_id", "resource_id"),
+    ("dublinCore.type", "fragment_metadata.dublincore.type.sort"),
 ])
 def test_fragment_sort(criteria, expected):
     assert resolve_fragment_sort_field(criteria) == expected
@@ -67,3 +72,9 @@ def test_resource_sort_criteria_are_refused_at_fragment_scope(criteria):
 
 def test_resource_sort_is_unchanged():
     assert resolve_sort_field("dublinCore.date") == "temporal.temporal.dublincore.date_start"
+
+
+def test_resources_facet_filters_on_resource_ids():
+    clause = build_resource_facet_clause(["MAUB-AB-01###Cartulaire de Maubuisson", "cid1998###La diplomatique urbaine"])
+
+    assert clause == {"terms": {"resource_id": ["MAUB-AB-01", "cid1998"]}}

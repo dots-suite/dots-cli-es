@@ -311,6 +311,31 @@ SEARCH_FIELDS = [
         SearchFieldType.TEXT,
     ),
 
+    # Reference of a fragment in its edition ("…, p. 1-2." in the cartulaires)
+    SearchField(
+        "dct:bibliographicCitation",
+        "dublincore.bibliographicCitation",
+        SearchFieldFamily.DCT,
+        SearchFieldType.TEXT,
+    ),
+
+    # Pages of a fragment ("49-59" for a CID article)
+    SearchField(
+        "dct:extent",
+        "dublincore.extent",
+        SearchFieldFamily.DCT,
+        SearchFieldType.TEXT,
+    ),
+
+    # Document typology set by the editor ("act", "rjud", "cens"… in the cartulaires)
+    SearchField(
+        "dct:type",
+        "dublincore.type",
+        SearchFieldFamily.DCT,
+        SearchFieldType.KEYWORD,
+        facet=True,
+    ),
+
     SearchField(
         "dct:isVersionOf",
         "dublincore.isVersionOf",
@@ -1050,7 +1075,8 @@ def resolve_fragment_sort_field(criteria: str) -> str:
     if criteria.startswith("fragment_metadata.") and criteria.endswith(".keyword"):
         return f"{criteria[: -len('.keyword')]}.sort"
 
-    if criteria.startswith(("fragment_metadata.", "fragment_temporal.")) or criteria in ("passage_id", "level"):
+    # `path` ("Root > Sub-collection > Resource") keeps the fragments of a group together
+    if criteria.startswith(("fragment_metadata.", "fragment_temporal.")) or criteria in ("passage_id", "level", "path", "resource_id"):
         return criteria
 
     raise ValueError(f"Sort criterion {criteria!r} is not available at fragment scope")
