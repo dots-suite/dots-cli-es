@@ -1766,45 +1766,56 @@ async def fetch_collection(app, collection_id: str):
     return None
 
 
-async def get_parent_collection(app, current_id, stop_at, stop_at_name):
+async def get_parent_collection(
+    app, current_id, stop_at, stop_at_name, client=None, cache=None
+):
     """
-    Async helper to fetch the parent collection ID from the DTS API based on the current collection ID.
-    This function sends a request to the DTS API to retrieve metadata for the given collection ID.
-    If the parent collection exists, it returns the parent ID.
+    Fetch the parent collection of `current_id` from the DTS API.
 
-    :param app: The application context, containing configuration (DTS URL).
-    :param current_id: The current collection ID for which the parent ID is to be fetched.
-    :return: Parent collection ID if exists, otherwise None.
+    Reuses `client` (created if None) and memoizes the result in `cache` keyed by
+    current_id, including None on error, so shared ancestors are fetched once.
+    Returns [parent_id, parent_label, title] or None.
     """
     dts_url = app.config["DTS_URL"]
+    client = client or httpx.AsyncClient(timeout=30.0)
+    if cache is not None and current_id in cache:
+        return cache[current_id]
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Fetch metadata for the current collection
-            response = await client.get(f"{dts_url}/collection", params={"id": current_id, "nav": 'parents'})
-            response.raise_for_status()  # Check for errors in the response
+        # Fetch metadata for the current collection
+        response = await client.get(f"{dts_url}/collection", params={"id": current_id, "nav": 'parents'})
+        response.raise_for_status()  # Check for errors in the response
 
-            # Parse response
-            data = response.json()
-            # Extract the parent ID from the metadata
-            if data.get("member"):
-                parent_id = data["member"][0]["@id"]
-                parent_label = data["member"][0]['title']
-            else:
-                parent_id = stop_at
-                parent_label = stop_at_name
+        # Parse response
+        data = response.json()
+        # Extract the parent ID from the metadata
+        if data.get("member"):
+            parent_id = data["member"][0]["@id"]
+            parent_label = data["member"][0]['title']
+        else:
+            parent_id = stop_at
+            parent_label = stop_at_name
 
-            if parent_id:
-                return [parent_id, parent_label, data.get("title")]
-            else:
-                return None  # No parent collection found
+        result = [parent_id, parent_label, data.get("title")] if parent_id else None
+        if cache is not None:
+            cache[current_id] = result
+        return result
 
     except Exception as e:
         print(f"⚠️ Error fetching parent collection ID for {current_id}: {e}")
+        if cache is not None:
+            cache[current_id] = None
         return None  # In case of an error, return None
 
 
-async def build_parent_chain(app, collection_id: str, stop_at: str | None = None, stop_at_name: str | None = None) -> list[str]:
+async def build_parent_chain(
+    app,
+    collection_id: str,
+    stop_at: str | None = None,
+    stop_at_name: str | None = None,
+    client=None,
+    cache=None,
+) -> list[list[str]]:
     """
     Build the parent breadcrumb chain for a target collection.
     Stops if stop_at is reached (optional).
@@ -1819,17 +1830,16 @@ async def build_parent_chain(app, collection_id: str, stop_at: str | None = None
             # Prevent infinite loops
             break
 
+        result = await get_parent_collection(app, current_id, stop_at, stop_at_name, client=client, cache=cache)
+        if result is None:
+            break
         chain.insert(0, current_id)  # prepend to have root -> target
-        print('await result', stop_at, stop_at_name)
-        result = await get_parent_collection(app, current_id, stop_at, stop_at_name) # async helper fetching DTS metadata
-        print('result', result)
         current_name = result[2]
 
         if current_id != stop_at:
             chain_label.insert(0, current_name)
         parent_id = result[0]
         parent_label = result[1]
-        print('build_parent parent_id / parent_label', parent_id, parent_label)
         if stop_at and parent_id == stop_at:
             chain.insert(0, parent_id)
             chain_label.insert(0, parent_label)
@@ -2308,16 +2318,13 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
 
     if target_collections:
         tasks = []
-        for coll in target_collections:
-            # Build breadcrumb from root to target
-            print('crawl debug', root_collection_name)
-            result = await build_parent_chain(app, coll, stop_at=root_collection_id, stop_at_name=root_collection_name)
-            chain = result[0]
-            chain_label = result[1]
-            print('crawl_collection debug chain', chain)
-            print('crawl_collection debug chain_label', chain_label)
+        cache = {}
+        chains = await asyncio.gather(*(
+            build_parent_chain(app, coll, stop_at=root_collection_id, stop_at_name=root_collection_name, client=client, cache=cache)
+            for coll in target_collections
+        ))
+        for chain, chain_label in chains:
             parent_id = chain[-2]
-            print('crawl_collection debug parent_id', parent_id)
             tasks.append(crawl_branch(app, chain, chain_label, collection_index, target_collections, visited, semaphore, resource_queue, parent_id, parent_path, parent_path_ids))
         await asyncio.gather(*tasks)
 
