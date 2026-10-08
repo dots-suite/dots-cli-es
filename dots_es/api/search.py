@@ -69,32 +69,6 @@ HIGHLIGHT_CONFIG = {
     }
 }
 
-def build_collection_facet(scope_collection_id):
-    return {
-        "filter": {
-            "bool": {
-                "must": [
-                    {"term": {"type.keyword": "Resource"}}
-                ],
-                "filter": [
-                    {
-                        "term": {
-                            "resource_metadata.path_ids.keyword": scope_collection_id
-                        }
-                    }
-                ]
-            }
-        },
-        "aggs": {
-            "values": {
-                "terms": {
-                    "field": "collection_facets",
-                    "size": 100000
-                }
-            }
-        }
-    }
-
 def parse_query_param(query_param: str, searchType: str = "notice"):
     """
     Parser ES :
