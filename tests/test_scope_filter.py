@@ -11,5 +11,5 @@ def test_scope_prefix_does_not_match_sibling_ids():
     assert not "ENCPOS_1886###1886".startswith(build_scope_filter("ENCPOS")["prefix"]["collection_facets"])
 
 
-def test_no_collection_means_no_scope():
-    assert build_scope_filter(None) == {"match_all": {}}
+def test_no_collection_means_no_results():
+    assert build_scope_filter(None) == {"match_none": {}}
