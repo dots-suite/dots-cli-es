@@ -431,9 +431,12 @@ def build_scope_filter(collection_id: str) -> dict:
     `collection_facets` holds every branch of a resource with several parents,
     `path_ids` only the branch it was indexed with last: a play filed under both
     "moliere" and "comedie" must be found from either.
+
+    Without a collection id nothing matches: a search endpoint scopes by
+    collection and must not return the whole corpus.
     """
     if not collection_id:
-        return {"match_all": {}}
+        return {"match_none": {}}
 
     return {"prefix": {"collection_facets": f"{collection_id}###"}}
 
