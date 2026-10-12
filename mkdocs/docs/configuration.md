@@ -32,9 +32,9 @@ is fixed: one deployment, one configuration directory.
 | Key | Controls |
 |---|---|
 | `ELASTICSEARCH_URL` | ES endpoint used by both the CLI and the API. |
-| `DOCUMENT_INDEX` | Index holding the passages. Default `dots_document`. |
+| `COLLECTION_INDEX` | Index holding collections. Default `dots_collections`. |
 | `RESOURCE_INDEX` | Index holding the resources, one document each. Default `dots_resources`, also when the key is missing. |
-| `COLLECTION_INDEX` | Index holding collections. Default `dots_collection`. |
+| `FRAGMENT_INDEX` | Index holding the passages. Default `dots_fragments`. |
 | `SEARCH_RESULT_PER_PAGE` | Default `page[size]` of the search API. Default `200`. |
 
 ### Differences between the three files
@@ -92,7 +92,7 @@ the directory the command is run from. It then:
 1. replaces every `None` with an empty string;
 2. expands environment variables in **every** string value;
 3. **flattens** `source:` and `config:` into a single dictionary — `app.config["DTS_URL"]` and
-   `app.config["DOCUMENT_INDEX"]` sit side by side;
+   `app.config["FRAGMENT_INDEX"]` sit side by side;
 4. coerces `ADDITIONAL_EXCLUDED_COLLECTIONS` into a lowercase set.
 
 !!! warning "Operational caveats"

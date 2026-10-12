@@ -24,9 +24,9 @@ source:
   TARGET_COLLECTION: "theater"
 config:
   ELASTICSEARCH_URL: "http://localhost:9200"
-  DOCUMENT_INDEX: "dots_document"
+  COLLECTION_INDEX: "dots_collections"
   RESOURCE_INDEX: "dots_resources"
-  COLLECTION_INDEX: "dots_collection"
+  FRAGMENT_INDEX: "dots_fragments"
 ```
 
 `TARGET_COLLECTION` is the root of the crawl. Keep it small for a first run — the public demo
@@ -72,14 +72,14 @@ dots-es-cli --config=local index --collections=theater
 ## 5. Check what landed in Elasticsearch
 
 ```bash
-curl -X POST "http://localhost:9200/dots_document/_refresh?pretty"
+curl -X POST "http://localhost:9200/dots_fragments/_refresh?pretty"
 curl "http://localhost:9200/_cat/indices?v"
 ```
 
 With security enabled, prefix the host with credentials:
 
 ```bash
-curl -X POST "http://elastic:$ES_PASSWORD@localhost:9200/dots_document/_refresh?pretty"
+curl -X POST "http://elastic:$ES_PASSWORD@localhost:9200/dots_fragments/_refresh?pretty"
 ```
 
 ## 6. Search from the CLI
@@ -91,7 +91,7 @@ dots-es-cli --config=local search "Molière"
 Or with a full Lucene query string:
 
 ```bash
-dots-es-cli --config=local search -t "content:tragédie" --indexes=dots_document
+dots-es-cli --config=local search -t "content:tragédie" --indexes=dots_fragments
 ```
 
 ## 7. Run the search API
@@ -103,7 +103,7 @@ dots-api --config=local
 Then open:
 
 ```
-http://localhost:5003/api/1.0/search?query=*&index=dots_document
+http://localhost:5003/api/1.0/search?query=*&index=dots_fragments
 ```
 
 The API listens on **port 5003** by default. See [Search API](search-api.md) for every query

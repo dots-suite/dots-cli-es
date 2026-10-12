@@ -39,7 +39,7 @@ class App:
         ) if self.config.get("ELASTICSEARCH_URL") else None
 
         # Combined indexes string for ES
-        self.all_indexes = f"{self.config['DOCUMENT_INDEX']},{self.config['RESOURCE_INDEX']},{self.config['COLLECTION_INDEX']}"
+        self.all_indexes = f"{self.config['FRAGMENT_INDEX']},{self.config['RESOURCE_INDEX']},{self.config['COLLECTION_INDEX']}"
 
         # Store excluded collections as lowercase for case-insensitive comparison
         self.excluded_collections = {c.lower() for c in self.config.get("ADDITIONAL_EXCLUDED_COLLECTIONS", [])}
@@ -137,11 +137,11 @@ def get_indexation_csv_paths(app):
         ),
         "document_exceptions": os.path.join(
             base_dir,
-            f"{ts}_{app.config['DOCUMENT_INDEX']}_indexation_exceptions.csv"
+            f"{ts}_{app.config['FRAGMENT_INDEX']}_indexation_exceptions.csv"
         ),
         "document_no_text": os.path.join(
             base_dir,
-            f"{ts}_{app.config['DOCUMENT_INDEX']}_no_text.csv"
+            f"{ts}_{app.config['FRAGMENT_INDEX']}_no_text.csv"
         ),
         "collection_exceptions": os.path.join(
             base_dir,
@@ -1518,7 +1518,7 @@ async def index_resource_passages_async(
 #     collection_id = collection_metadata["id"]
 #     dts_url = app.config["DTS_URL"]
 #     print('index_resource_passages', resource_id)
-#     print('index used for resource indexation', app.config["DOCUMENT_INDEX"])
+#     print('index used for resource indexation', app.config["FRAGMENT_INDEX"])
 #
 #     # Async fetch navigation index
 #     nav_index = await build_navigation_index(app, dts_url, resource_id, client=client)
@@ -2664,7 +2664,7 @@ def make_cli():
             - Crawl des collections et resources
             - Écriture des fichiers JSONL
             - Indexation Elasticsearch via index_jsonl()
-                - passages (DOCUMENT_INDEX)
+                - passages (FRAGMENT_INDEX)
                 - documents (RESOURCE_INDEX)
                 - collections (COLLECTION_INDEX)
             - Optionally, limit indexing to specific collections with --collections.
@@ -2673,7 +2673,7 @@ def make_cli():
        # crawler and extract DTS data
         app = cli_ctx.app
         es = app.elasticsearch
-        doc_index = app.config["DOCUMENT_INDEX"]
+        doc_index = app.config["FRAGMENT_INDEX"]
         resource_index = app.config["RESOURCE_INDEX"]
         coll_index = app.config["COLLECTION_INDEX"]
 
@@ -2698,7 +2698,7 @@ def make_cli():
 
         print('index collections:', collections)
         print('index _index_name:', app.config['COLLECTION_INDEX'])
-        print('index _index_name:', app.config['DOCUMENT_INDEX'])
+        print('index _index_name:', app.config['FRAGMENT_INDEX'])
         print('index _index_name:', app.config['RESOURCE_INDEX'])
         try:
             _index_name = app.config['COLLECTION_INDEX']
@@ -2763,13 +2763,13 @@ def make_cli():
                             doc = json.loads(line)
                             apply_collection_scope(doc, collection_scopes)
 
-                            bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
+                            bulk_actions.append({"index": {"_index": app.config["FRAGMENT_INDEX"],
                                                            "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
                             bulk_actions.append(doc)
 
                             # bulk_actions.append({
                             #     "update": {
-                            #         "_index": app.config["DOCUMENT_INDEX"],
+                            #         "_index": app.config["FRAGMENT_INDEX"],
                             #         "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'
                             #     }
                             # })

@@ -13,11 +13,11 @@ dots-es-cli [--config local|staging|prod] index [--collections id1,id2]
 2. **Crawl from memory.** The crawler resolves each collection and resource from the dictionaries
    built at step 1 instead of issuing an HTTP request per node. Records are normalised and written as
    JSONL under `out/`.
-3. **Ensure the indexes exist.** For each of `DOCUMENT_INDEX`, `RESOURCE_INDEX` and `COLLECTION_INDEX`: if missing, it
+3. **Ensure the indexes exist.** For each of `FRAGMENT_INDEX`, `RESOURCE_INDEX` and `COLLECTION_INDEX`: if missing, it
    is created from the [mapping files](elasticsearch.md); if present, a
    [mapping-drift warning](elasticsearch.md#mapping-drift) is printed when the live `dynamic` setting
    differs from the conf.
-4. **Bulk-index passages** into `DOCUMENT_INDEX`, with `_id = "{resource_id}::{passage_id}"`.
+4. **Bulk-index passages** into `FRAGMENT_INDEX`, with `_id = "{resource_id}::{passage_id}"`.
 5. **Index resource documents** into `RESOURCE_INDEX`, one by one.
 6. **Index collections** into `COLLECTION_INDEX`.
 7. **Print a summary** and write the [CSV reports](reporting.md).
@@ -39,7 +39,7 @@ Resource and fragment metadata are stored in two indexes:
 | Field | Index | Source |
 |---|---|---|
 | `resource_metadata`, `temporal`, `collections` | `RESOURCE_INDEX` | The resource, stored once. A passage only carries its `resource_id`, plus `path_ids` and `collection_facets` for scoping. |
-| `fragment_metadata`, `fragment_temporal` | `DOCUMENT_INDEX` | The fragment itself. Empty when the DTS server describes nothing at that level. |
+| `fragment_metadata`, `fragment_temporal` | `FRAGMENT_INDEX` | The fragment itself. Empty when the DTS server describes nothing at that level. |
 
 ThunderDots never copies resource metadata or dates into fragments, and neither does this project:
 a cartulaire act dated March 1241 has `fragment_temporal` 1241, while its `temporal` holds the
@@ -91,7 +91,7 @@ They are the reason `DTS_URL` must stay reachable even though the graph is prefe
 Refresh and count:
 
 ```bash
-curl -X POST "http://localhost:9200/dots_document/_refresh?pretty"
+curl -X POST "http://localhost:9200/dots_fragments/_refresh?pretty"
 curl "http://localhost:9200/_cat/indices?v"
 ```
 

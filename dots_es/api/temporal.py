@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Root of the temporal index searched at each level (`scope` parameter):
 # the resource dates live under `temporal` in RESOURCE_INDEX, the
-# fragment's own dates under `fragment_temporal` in DOCUMENT_INDEX.
+# fragment's own dates under `fragment_temporal` in FRAGMENT_INDEX.
 TEMPORAL_ROOTS = {
     "resource": "temporal",
     "fragment": "fragment_temporal",

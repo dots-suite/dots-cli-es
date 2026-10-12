@@ -13,7 +13,8 @@ source:
 # -------------------------------------------------------------------
 config:
   ELASTICSEARCH_URL: "http://localhost:9200"
-  DOCUMENT_INDEX: "dots_document"
-  COLLECTION_INDEX: "dots_collection"
+  COLLECTION_INDEX: "dots_collections"
+  RESOURCE_INDEX: "dots_resources"
+  FRAGMENT_INDEX: "dots_fragments"
   SEARCH_RESULT_PER_PAGE: 200
 

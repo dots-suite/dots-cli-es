@@ -8,7 +8,7 @@ All files of a single run share one UTC timestamp prefix with minute resolution,
 the CLI starts:
 
 ```
-2026_09_09_09_57_dots_document_indexation_exceptions.csv
+2026_09_09_09_57_dots_fragments_indexation_exceptions.csv
 2026_09_09_09_57_indexed_passages_report.csv
 …
 ```
@@ -22,8 +22,8 @@ the CLI starts:
 | File | Columns | Written when |
 |---|---|---|
 | `{ts}_indexed_passages_report.csv` | `timestamp, resource_id, passage_id` | One row per passage successfully built. This is your reference count. |
-| `{ts}_{DOCUMENT_INDEX}_indexation_exceptions.csv` | `timestamp, resource_id, passage_id, error_type, error_message, context` | A passage could not be built. **Also reused** for resource-level indexing failures, which write a shorter 5-column row — so this file can mix two row shapes. |
-| `{ts}_{DOCUMENT_INDEX}_no_text.csv` | `timestamp, resource_id, passage_id, citeType, level, reason, context` | A fragment has neither `content` nor `head`, and was **skipped**. `reason` is always `NoIndexableText`. |
+| `{ts}_{FRAGMENT_INDEX}_indexation_exceptions.csv` | `timestamp, resource_id, passage_id, error_type, error_message, context` | A passage could not be built. **Also reused** for resource-level indexing failures, which write a shorter 5-column row — so this file can mix two row shapes. |
+| `{ts}_{FRAGMENT_INDEX}_no_text.csv` | `timestamp, resource_id, passage_id, citeType, level, reason, context` | A fragment has neither `content` nor `head`, and was **skipped**. `reason` is always `NoIndexableText`. |
 | `{ts}_{COLLECTION_INDEX}_indexation_exceptions.csv` | `timestamp, collection_id, error_type, error_message, context` | DTS collection fetch errors, JSONL write failures, and Elasticsearch collection indexing failures. |
 | `{ts}_passage_exceptions.csv` | `timestamp, resource_id, passage_id, error_type, error_message, context` | JSON decode failures, bulk call failures, and **per-item Elasticsearch bulk rejections**. |
 | `{ts}_metadata_dts_sanitization.csv` | `timestamp, collection_id, json_path, error_type, value` | Empty JSON keys found while sanitising a raw DTS response. |
@@ -56,7 +56,7 @@ A practical checklist:
 
 4. **Collection exceptions** point at DTS availability problems rather than at your mappings.
 5. **Cross-check the counts**: rows in `{ts}_indexed_passages_report.csv` versus the "passages"
-   figure of the summary, versus `GET /dots_document/_count`.
+   figure of the summary, versus `GET /dots_fragments/_count`.
 6. **Watch stdout** for the `⚠️ Index … mapping 'dynamic=…' differs from conf` warning: it means the
    conf was never applied to that index.
 

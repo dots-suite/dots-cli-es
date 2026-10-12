@@ -8,7 +8,7 @@ Files located in this directory are **automatically generated** by the applicati
 
 In particular, it may contain:
 
-- `dots_document_indexation_exceptions.csv`  
+- `dots_fragments_indexation_exceptions.csv`  
   → Report of errors encountered during DTS passage indexing  
   (e.g. passages present in the `navigation` endpoint but missing from TEI files)
 
@@ -22,7 +22,7 @@ In particular, it may contain:
 
 ## CSV report format
 
-### `dots_document_indexation_exceptions.csv`
+### `dots_fragments_indexation_exceptions.csv`
 
 This file lists **all DTS passages that could not be indexed correctly**, without interrupting the overall indexing process.
 

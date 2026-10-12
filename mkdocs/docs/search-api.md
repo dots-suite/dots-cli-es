@@ -11,7 +11,7 @@ overrides `--config`.
 Smoke test:
 
 ```
-http://localhost:5003/api/1.0/search?query=*&index=dots_document
+http://localhost:5003/api/1.0/search?query=*&index=dots_fragments
 ```
 
 ## The endpoint
@@ -129,7 +129,7 @@ together across pages; each result carries `path` and `path_ids` to build the gr
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `index` | `DOCUMENT_INDEX` | Elasticsearch index of the passages. |
+| `index` | `FRAGMENT_INDEX` | Elasticsearch index of the passages. |
 | `resourceIndex` | `RESOURCE_INDEX` | Elasticsearch index of the resources. |
 | `query` | `match_all` | Supports exact phrases, `AND`/`OR`/`NOT`, `*` and `?` wildcards, and `field:value` with aliases. Default operator is `AND`, wildcards are analyzed. The available field aliases differ between the two modes. |
 | `no-highlight` | absent | Mode switch, see above. |

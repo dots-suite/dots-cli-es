@@ -53,7 +53,7 @@ Applies the [mapping files](elasticsearch.md) to one or both indexes.
 
 ```bash
 dots-es-cli --config=local update-conf --rebuild
-ES_PASSWORD=xxx dots-es-cli --config=prod update-conf --rebuild --indexes=dots_document
+ES_PASSWORD=xxx dots-es-cli --config=prod update-conf --rebuild --indexes=dots_fragments
 ```
 
 Without `--rebuild` on an existing index, Elasticsearch answers `resource_already_exists_exception`
@@ -73,7 +73,7 @@ Deletes indexes outright.
 | `--indexes` | **required** | Comma-separated index names. |
 
 ```bash
-dots-es-cli --config=local delete --indexes=dots_document
+dots-es-cli --config=local delete --indexes=dots_fragments
 ```
 
 ---
@@ -90,7 +90,7 @@ A convenience query runner; the result is pretty-printed to stdout.
 
 ```bash
 dots-es-cli --config=local search "Molière"
-dots-es-cli search -t "content:tragédie AND type.keyword:fragment" --indexes=dots_document
+dots-es-cli search -t "content:tragédie AND type.keyword:fragment" --indexes=dots_fragments
 ```
 
 !!! note "`--term` is the *broader* mode"

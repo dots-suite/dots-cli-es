@@ -49,7 +49,7 @@ MAX_PAGE_SIZE = 200
 
 # fvh: more balanced context around the term.
 # Requires "with_positions_offsets" term_vector on
-# content (set in dots_document.conf.json).
+# content (set in dots_fragments.conf.json).
 # fragment_offset: context before the highlighted term (fvh only).
 # No boundary_scanner: with fvh, it can stretch fragments
 # far beyond fragment_size.
@@ -546,7 +546,7 @@ def register_search_endpoint(
 
         index: str = request.args.get("index", None)
         if index is None or len(index) == 0:
-            index = current_app.config["DOCUMENT_INDEX"]
+            index = current_app.config["FRAGMENT_INDEX"]
 
         # Resource metadata and dates are only stored in their own index
         resource_index: str = request.args.get("resourceIndex") or current_app.config["RESOURCE_INDEX"]

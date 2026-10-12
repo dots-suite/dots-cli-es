@@ -5,13 +5,13 @@ Four JSON files shipped with the package define how the indexes are built:
 ```
 dots_es/elasticsearch/
 ├── _global.conf.json          # settings, applied to every index
-├── dots_collection.conf.json  # mappings for the collections index
-├── dots_document.conf.json    # mappings for the passages index
-└── dots_resources.conf.json   # mappings for the resources index
+├── dots_collections.conf.json  # mappings for the collections index
+├── dots_fragments.conf.json    # mappings for the passages index
+└── dots_resources.conf.json    # mappings for the resources index
 ```
 
 !!! warning "File name must equal index name"
-    `update-conf` looks for `{index_name}.conf.json`. If you rename `DOCUMENT_INDEX` or `RESOURCE_INDEX` in the YAML
+    `update-conf` looks for `{index_name}.conf.json`. If you rename `FRAGMENT_INDEX` or `RESOURCE_INDEX` in the YAML
     without renaming the JSON file accordingly, the command prints *"conf not found"* and moves on —
     the index is created with no mapping at all.
 
@@ -31,10 +31,10 @@ dots_es/elasticsearch/
     `folding` depends on `icu_folding`. Without the `analysis-icu` plugin installed in Elasticsearch,
     creating the indexes fails. See [Installation](installation.md).
 
-The declared `keyword` *analyzer* is not referenced by either mapping file — `dots_collection` uses
+The declared `keyword` *analyzer* is not referenced by either mapping file — `dots_collections` uses
 the built-in `french` analyzer instead.
 
-## `dots_collection.conf.json`
+## `dots_collections.conf.json`
 
 `"dynamic": "strict"`, with explicit properties only:
 
@@ -48,7 +48,7 @@ the built-in `french` analyzer instead.
     Members are stored but not indexed. This is deliberate: indexing them would create one field per
     member id and blow through the field-count limit.
 
-## `dots_document.conf.json`
+## `dots_fragments.conf.json`
 
 `"dynamic": "strict"`, `"date_detection": false` plus five **dynamic templates**, which is what lets new metadata fields appear
 without a mapping change:
@@ -66,7 +66,7 @@ without a mapping change:
     like one (`1241-03`), before any dynamic template applies. Every later value that is not an ISO
     date (`1160–1196`) then rejects its **whole document**: on the cartulaires, 2,029 fragments were
     lost that way. Dates are indexed on purpose under `temporal` and `fragment_temporal`; every other
-    metadata string stays text. The same setting applies to `dots_collection`.
+    metadata string stays text. The same setting applies to `dots_collections`.
 
 Explicit properties include `resource_id`, `passage_id`, `citeType`, `path`, `path_ids`,
 `collection_facets` (keyword), `level` (integer), `title` and `content` (`text` / `folding`), the dynamic
@@ -98,7 +98,7 @@ Explicit properties: `type`, `resource_id`, `level`, `collection_facets`, the dy
 dots-es-cli --config=local update-conf --rebuild
 
 # a single index
-ES_PASSWORD=xxx dots-es-cli --config=prod update-conf --rebuild --indexes=dots_document
+ES_PASSWORD=xxx dots-es-cli --config=prod update-conf --rebuild --indexes=dots_fragments
 ```
 
 What the command does, per index:
@@ -121,7 +121,7 @@ When `index` runs against an existing index, it compares the live `dynamic` sett
 the conf file and prints a warning such as:
 
 ```
-⚠️ Index dots_document mapping 'dynamic=true' differs from conf
+⚠️ Index dots_fragments mapping 'dynamic=true' differs from conf
 ```
 
 That warning means the conf file was **never applied** to this index — run `update-conf --rebuild`
