@@ -790,11 +790,7 @@ def build_searchfield_aggs(exclude_ids: set[str] | None = None, scope: str = "re
         if field.type != SearchFieldType.KEYWORD:
             continue
 
-        es_field = (
-            f"{get_fragment_es_path(field)}.keyword"
-            if scope == "fragment"
-            else get_es_field(field)
-        )
+        es_field = facet_es_field(field, scope)
 
         aggs[field.id] = {
             "terms": {
@@ -804,6 +800,39 @@ def build_searchfield_aggs(exclude_ids: set[str] | None = None, scope: str = "re
         }
 
     return aggs
+
+
+def facet_es_field(field, scope: str = "resource") -> str:
+    return f"{get_fragment_es_path(field)}.keyword" if scope == "fragment" else get_es_field(field)
+
+
+def build_facet_presence_agg(perimeter: list, exclude_ids: set[str] | None = None, scope: str = "resource"):
+    """
+    Count the documents of the perimeter carrying each keyword facet field,
+    whatever the query and the selected values.
+    """
+    exists = {
+        field.key: {"exists": {"field": facet_es_field(field, scope)}}
+        for field in facet_fields(exclude_ids, scope)
+        if field.type == SearchFieldType.KEYWORD
+    }
+
+    return {
+        "global": {},
+        "aggs": {
+            "perimeter": {
+                "filter": {"bool": {"filter": perimeter}},
+                # ES refuses an empty filters aggregation (every facet excluded)
+                "aggs": {"fields": {"filters": {"filters": exists}}} if exists else {}
+            }
+        }
+    }
+
+
+def present_facet_keys(presence_agg: dict) -> set[str]:
+    """Facets having at least one value in the perimeter."""
+    buckets = presence_agg["perimeter"].get("fields", {}).get("buckets", {})
+    return {key for key, bucket in buckets.items() if bucket["doc_count"]}
 
 
 def facet_fields(exclude_ids: set[str] | None = None, scope: str = "resource"):

@@ -18,7 +18,9 @@ from dots_es.api.temporal import (
 
 from dots_es.api.search_fields import (
     build_searchfield_aggs,
+    build_facet_presence_agg,
     extract_searchfield_facets,
+    present_facet_keys,
     get_facet_es_field,
     resolve_sort_field,
     resolve_fragment_sort_field
@@ -782,6 +784,13 @@ def register_search_endpoint(
                 level_filters = [{"terms": {"citeType": cite_types}}] if cite_types else []
                 body_query["query"]["bool"]["filter"].extend(level_filters)
 
+                # Facets without any value on these fragments are not returned
+                body_query["aggregations"]["facet_presence"] = build_facet_presence_agg(
+                    [{"term": {"type.keyword": "fragment"}}, scope_filter] + level_filters,
+                    excluded_facets,
+                    scope
+                )
+
                 if filters_param:
                     es_filters = parse_filters_param(filters_param)
                     if es_filters:
@@ -896,6 +905,9 @@ def register_search_endpoint(
                     scope
                 )
 
+                present_facets = present_facet_keys(search_result["aggregations"]["facet_presence"])
+                facets = {key: values for key, values in facets.items() if key in present_facets}
+
                 if with_resources:
                     facets[RESOURCES_FACET] = extract_resources_facet(search_result["aggregations"], resource_index)
 
@@ -953,6 +965,12 @@ def register_search_endpoint(
 
                 body_query["aggregations"].update(
                     build_searchfield_aggs(excluded_facets)
+                )
+
+                # Facets without any value on the resources of the collection are not returned
+                body_query["aggregations"]["facet_presence"] = build_facet_presence_agg(
+                    [{"term": {"type.keyword": "Resource"}}, scope_filter],
+                    excluded_facets
                 )
 
                 # Ajouter la clause terme de la notice
@@ -1100,6 +1118,9 @@ def register_search_endpoint(
                     )
                 }
 
+                present_facets = present_facet_keys(search_result["aggregations"]["facet_presence"])
+                facets = {key: values for key, values in facets.items() if key in present_facets}
+
                 if with_collections:
                     facets["collections"] = collection_facets
 
@@ -1213,7 +1234,12 @@ def register_search_endpoint(
                                 }
                             }
                         },
-                        **build_searchfield_aggs(excluded_facets)
+                        **build_searchfield_aggs(excluded_facets),
+                        # Facets without any value on the resources of the collection are not returned
+                        "facet_presence": build_facet_presence_agg(
+                            [{"term": {"type.keyword": "Resource"}}, build_scope_filter(collection_id)],
+                            excluded_facets
+                        )
                     }
                 }
 
@@ -1375,6 +1401,9 @@ def register_search_endpoint(
                         excluded_facets
                     )
                 }
+
+                present_facets = present_facet_keys(search_result["aggregations"]["facet_presence"])
+                facets = {key: values for key, values in facets.items() if key in present_facets}
 
                 if with_collections:
                     facets["collections"] = collection_facets

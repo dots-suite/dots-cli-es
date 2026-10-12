@@ -3,9 +3,12 @@ import pytest
 from dots_es.api.search import build_resource_facet_clause
 
 from dots_es.api.search_fields import (
+    build_facet_presence_agg,
     build_searchfield_aggs,
     extract_searchfield_facets,
+    facet_fields,
     get_facet_es_field,
+    present_facet_keys,
     resolve_fragment_sort_field,
     resolve_sort_field,
 )
@@ -26,6 +29,33 @@ def test_fragment_facets_are_published_with_fragment_counts():
     facets = extract_searchfield_facets(aggregations, scope="fragment")
 
     assert facets["dublinCore.language"] == [{"value": "lat", "count": 436}]
+
+
+def test_facet_presence_checks_fragment_fields_in_the_perimeter():
+    perimeter = [{"term": {"type.keyword": "fragment"}}, {"terms": {"citeType": ["acte"]}}]
+
+    agg = build_facet_presence_agg(perimeter, scope="fragment")
+
+    assert agg["aggs"]["perimeter"]["filter"] == {"bool": {"filter": perimeter}}
+    assert agg["aggs"]["perimeter"]["aggs"]["fields"]["filters"]["filters"]["dublinCore.creator"] == {
+        "exists": {"field": "fragment_metadata.dublincore.creator.keyword"}
+    }
+
+
+def test_facets_without_values_in_the_perimeter_are_left_out():
+    presence = {"perimeter": {"fields": {"buckets": {
+        "dublinCore.creator": {"doc_count": 0},
+        "dublinCore.type": {"doc_count": 12743},
+    }}}}
+
+    assert present_facet_keys(presence) == {"dublinCore.type"}
+
+
+def test_facet_presence_without_any_facet():
+    agg = build_facet_presence_agg([], exclude_ids={field.key for field in facet_fields()})
+
+    assert agg["aggs"]["perimeter"]["aggs"] == {}
+    assert present_facet_keys({"perimeter": {"doc_count": 37}}) == set()
 
 
 def test_resource_facets_count_resource_documents():

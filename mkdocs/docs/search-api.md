@@ -89,6 +89,7 @@ At fragment scope:
   also breaks ties after an explicit `sort`;
 - **metadata facets** are the same facets as at resource scope, read in `fragment_metadata` and
   counting fragments; `facets={"dublinCore.language": ["lat"]}` filters on the fragment's language.
+  As at resource scope, a facet that no fragment of the perimeter carries is not returned.
   The `collections` facet also counts fragments;
 - **temporal facets** are discovered under `fragment_temporal.*`, so their `start_field` /
   `end_field` point there and the front-end sends its ranges back on those fields;
@@ -201,6 +202,11 @@ Facet aggregations are generated from the [search field registry](search-fields.
 aggregation per non-range `KEYWORD` field declared with `facet=True`. At resource scope it runs on
 `RESOURCE_INDEX`, one document per resource, so its `doc_count` is the **exact number of resources**;
 at fragment scope it counts fragments.
+
+A registry facet is only returned when at least one document of the perimeter carries it: the
+resources of the collection at resource scope, the fragments of the collection and of the requested
+`citeType` at fragment scope. A query or a selection can empty a facet, never remove it, so a
+collection only shows the facets its data fills.
 
 Buckets are computed under the field `id` and republished to clients under the canonical `key`
 (`dct:creator` → `dublinCore.creator`).
