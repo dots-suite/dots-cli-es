@@ -69,32 +69,6 @@ HIGHLIGHT_CONFIG = {
     }
 }
 
-def build_collection_facet(scope_collection_id):
-    return {
-        "filter": {
-            "bool": {
-                "must": [
-                    {"term": {"type.keyword": "Resource"}}
-                ],
-                "filter": [
-                    {
-                        "term": {
-                            "resource_metadata.path_ids.keyword": scope_collection_id
-                        }
-                    }
-                ]
-            }
-        },
-        "aggs": {
-            "values": {
-                "terms": {
-                    "field": "collection_facets",
-                    "size": 100000
-                }
-            }
-        }
-    }
-
 def parse_query_param(query_param: str, searchType: str = "notice"):
     """
     Parser ES :
@@ -457,9 +431,12 @@ def build_scope_filter(collection_id: str) -> dict:
     `collection_facets` holds every branch of a resource with several parents,
     `path_ids` only the branch it was indexed with last: a play filed under both
     "moliere" and "comedie" must be found from either.
+
+    Without a collection id nothing matches: a search endpoint scopes by
+    collection and must not return the whole corpus.
     """
     if not collection_id:
-        return {"match_all": {}}
+        return {"match_none": {}}
 
     return {"prefix": {"collection_facets": f"{collection_id}###"}}
 
