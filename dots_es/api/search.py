@@ -542,6 +542,31 @@ def build_scope_filter(collection_id: str) -> dict:
     return {"prefix": {"collection_facets": f"{collection_id}###"}}
 
 
+def get_collection_and_ancestors(index: str, collection_id: str) -> set[str]:
+    """
+    The collection and the collections above it, read from the path of one of its fragments.
+    """
+    result = current_app.elasticsearch.search(index=index, body={
+        "size": 1,
+        "query": build_scope_filter(collection_id),
+        "_source": ["path_ids"]
+    })
+    hits = result["hits"]["hits"]
+    path_ids = hits[0]["_source"].get("path_ids") or [] if hits else []
+
+    if collection_id not in path_ids:
+        return {collection_id}
+
+    return set(path_ids[:path_ids.index(collection_id) + 1])
+
+
+def without_collection_ancestors(values: list, excluded: set[str]) -> list:
+    """
+    Collections facet values minus the searched collection and the ones above it.
+    """
+    return [value for value in values if value["id"] not in excluded]
+
+
 def is_collection_indexed(index: str, collection_id: str) -> bool:
     """
     Check if there is at least one resource indexed for the scope collection
@@ -1518,6 +1543,17 @@ def register_search_endpoint(
                 if collection_id
                 else None
             )
+
+            # The collections facet only offers the sub-collections of the searched one
+            collections_facet = r.get("facets", {}).get("collections")
+            if collection_id and collections_facet is not None:
+                sub_collections = without_collection_ancestors(
+                    collections_facet, get_collection_and_ancestors(index, collection_id)
+                )
+                if sub_collections:
+                    r["facets"]["collections"] = sub_collections
+                else:
+                    del r["facets"]["collections"]
 
             r["scope"] = scope
             r["duration"] = float('%.4f' % (time.time() - start_time))
