@@ -149,13 +149,6 @@ SEARCH_FIELDS = [
     ),
 
     SearchField(
-        "cli:path",
-        "path",
-        SearchFieldFamily.CLI,
-        SearchFieldType.KEYWORD,
-    ),
-
-    SearchField(
         "cli:pathIds",
         "path_ids",
         SearchFieldFamily.CLI,
@@ -1131,8 +1124,8 @@ def resolve_fragment_sort_field(criteria: str) -> str:
     if criteria.startswith("fragment_metadata.") and criteria.endswith(".keyword"):
         return f"{criteria[: -len('.keyword')]}.sort"
 
-    # `path` ("Root > Sub-collection > Resource") keeps the fragments of a group together
-    if criteria.startswith(("fragment_metadata.", "fragment_temporal.")) or criteria in ("passage_id", "level", "path", "resource_id"):
+    # `path_order` is the corpus order: collections, resource, then fragment
+    if criteria.startswith(("fragment_metadata.", "fragment_temporal.")) or criteria in ("passage_id", "level", "path_order", "resource_id"):
         return criteria
 
     raise ValueError(f"Sort criterion {criteria!r} is not available at fragment scope")

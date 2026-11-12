@@ -90,7 +90,7 @@ def test_fragment_facet_filter():
     ("extensions.dateCreated", "fragment_temporal.temporal.extensions.dateCreated_start"),
     ("fragment_metadata.dublincore.type.keyword", "fragment_metadata.dublincore.type.sort"),
     ("passage_id", "passage_id"),
-    ("path", "path"),
+    ("path_order", "path_order"),
     ("resource_id", "resource_id"),
     ("dublinCore.type", "fragment_metadata.dublincore.type.sort"),
 ])

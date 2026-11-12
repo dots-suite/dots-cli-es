@@ -76,7 +76,7 @@ Two parameters combine into four searches:
 The two levels never mix. A resource search uses no fragment metadata or date, and a fragment search
 no resource metadata or date, whether for filtering, facets or sorting. The only resource data in a
 fragment search is the collection perimeter (`collectionId`, `collections` facet) and the resource
-title and path returned for display.
+title and collections returned for display.
 
 At fragment scope:
 
@@ -84,9 +84,9 @@ At fragment scope:
   lists the acts from the oldest to the most recent, and `total_count` counts fragments. Each item
   carries `passage_id`, `title`, `level`, `citeType`, `ancestors`, its `metadata`
   (`fragment_metadata`), its unflattened `temporal`, `highlight.content`, and, for display,
-  `resource_id`, `resource_title` and `path`;
-- **the default sort** is the score, then the document order (`resource_id`, `passage_id`), which
-  also breaks ties after an explicit `sort`;
+  `resource_id`, `resource_title`, `path_ids`, `path_order` and `collection_facets`;
+- **the default sort** is the score, then the corpus order (`path_order`), which also breaks ties
+  after an explicit `sort`: without a query, fragments come in the order of the corpus;
 - **metadata facets** are the same facets as at resource scope, read in `fragment_metadata` and
   counting fragments; `facets={"dublinCore.language": ["lat"]}` filters on the fragment's language.
   As at resource scope, a facet that no fragment of the perimeter carries is not returned.
@@ -127,13 +127,15 @@ selection. A structure facet with a single value offers no choice and is not ret
 ]
 ```
 
-### Grouping by sub-collection or resource
+### Corpus order
 
-Fragment results are a flat list. To display them grouped, sort on `path` first:
-`sort=path,dublinCore.date`. `path` is the path of the fragment's resource
-(`Root > Sub-collection > Resource`), so the fragments of a sub-collection, then of a resource, come
-together across pages; each result carries `path` and `path_ids` to build the group headers.
-`resource_id` is also accepted as a sort criterion.
+Resources and fragments carry `path_order`, the position of each collection in its parent, then of
+the resource, then, on fragments, of the fragment in its resource, as six-digit segments
+(`000001/000003/000024/000001`). Sorting on it (`sort=path_order`) lists them in the order of the
+corpus, as the tables of contents show it; it is also the last resort of every sort.
+
+The values of the `collections` and `resources` facets carry the smallest `path_order` of their
+documents, so that a client can list them in corpus order.
 
 ## Query parameters
 
@@ -155,7 +157,7 @@ together across pages; each result carries `path` and `path_ids` to build the gr
 | `filters` | none | `field:value1\|value2,field2:value3` — one clause per comma, values within a field joined with `OR`. Each clause becomes a `query_string` restricted to that field. |
 | `page[number]` | `1` | Offset pagination. |
 | `page[size]` | `SEARCH_RESULT_PER_PAGE` (200) | **Minimum 25**, no maximum. |
-| `sort` | `dublinCore.created` ascending, then `_score` descending | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
+| `sort` | `dublinCore.created` ascending, then `_score` descending (resource full text); `_score` elsewhere; `path_order` last | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
 
 <sup>*</sup> These two parameters exist mainly for the
 [dots-vue](https://github.com/dots-suite/dots-vue) front-end and the per-collection settings it

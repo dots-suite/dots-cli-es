@@ -967,11 +967,21 @@ def extract_fragment_metadata(fragment: dict) -> dict:
     return fragment_metadata
 
 
+# Width of each path_order segment: fixed, so that the strings sort like the corpus
+PATH_ORDER_WIDTH = 6
+
+
+def path_order_segment(position: int) -> str:
+    return str(position).zfill(PATH_ORDER_WIDTH)
+
+
 def extract_metadata(
     response,
     parent_id=None,
     parent_path=None,
-    parent_path_ids=None
+    parent_path_ids=None,
+    parent_path_order=None,
+    position=1
 ):
     """
     Extrait les métadonnées d'une ressource DTS.
@@ -1009,6 +1019,8 @@ def extract_metadata(
 
         "path": path,
         "path_ids": path_ids,
+        # Position of each ancestor in its parent, then of this object: the corpus order
+        "path_order": "/".join(filter(None, [parent_path_order, path_order_segment(position)])),
         "level": len(path_ids) - 1,
 
         "dtsVersion": response.get("dtsVersion"),
@@ -1184,6 +1196,10 @@ def sanitize_resource_metadata(
         None
     )
 
+    # Labels of the path are kept in collection_facets; path_order is on the document itself
+    cleaned.pop("path", None)
+    cleaned.pop("path_order", None)
+
     return cleaned
 
 #10juillet def sanitize_resource_metadata(resource_metadata: dict) -> dict:
@@ -1358,8 +1374,8 @@ async def index_resource_passages_async(
                 "content": normalize_text(
                     resource_metadata.get("metadata", {}).get("text", "")
                 ),
-                "path": resource_metadata.get("path"),
                 "path_ids": resource_metadata.get("path_ids"),
+                "path_order": f"{resource_metadata.get('path_order')}/{path_order_segment(1)}",
                 "ancestors": [],
                 # Resource metadata, dates and collections live in RESOURCE_INDEX only
                 "collection_facets": build_collection_facets(collection_metadata)
@@ -1382,7 +1398,7 @@ async def index_resource_passages_async(
     # ---------------------------------------------------------------------
     # MAIN LOOP: fragments → passages
     # ---------------------------------------------------------------------
-    for fragment in fragments:
+    for rank, fragment in enumerate(fragments, start=1):
         try:
             passage_id = fragment.get("id")
             if not passage_id:
@@ -1414,8 +1430,9 @@ async def index_resource_passages_async(
                 "fragment_temporal": build_filtered_temporal_metadata(
                     fragment.get("temporal") or {}
                 ),
-                "path": resource_metadata.get("path"),
                 "path_ids": resource_metadata.get("path_ids"),
+                # Rank of the fragment in the ThunderDots list, which follows the navigation
+                "path_order": f"{resource_metadata.get('path_order')}/{path_order_segment(rank)}",
                 "ancestors": ancestors,
                 # Resource metadata, dates and collections live in RESOURCE_INDEX only
                 "collection_facets": build_collection_facets(collection_metadata)
@@ -1454,6 +1471,7 @@ async def index_resource_passages_async(
     document = {
         "resource_id": resource_id,
         "type": "Resource",
+        "path_order": resource_metadata.get("path_order"),
         "resource_metadata": sanitize_resource_metadata(
                     resource_metadata
                 ),
@@ -2062,7 +2080,7 @@ async def resource_worker(
 #         )
 
 async def crawl_branch(app, chain: list[str], chain_label: list[str], target_collections: set | None, visited: set, semaphore: asyncio.Semaphore, resource_queue: asyncio.Queue | None = None, parent_id=None, parent_path=None, parent_path_ids=None,
-    in_target_branch=False):
+    in_target_branch=False, parent_path_order=None, position=1):
     """
     Crawl a single branch of collections from root -> target.
     Only indexes collections in target_collections or non-excluded.
@@ -2139,7 +2157,9 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], target_col
                 data,
                 parent_id=parent_id,
                 parent_path=parent_path,
-                parent_path_ids=parent_path_ids
+                parent_path_ids=parent_path_ids,
+                parent_path_order=parent_path_order,
+                position=position
             )
 
             collection_es_id = collection_metadata.get("id") or f"collection_{collection_id}"
@@ -2155,7 +2175,7 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], target_col
             # ─────────────────────────────
             # MEMBERS LOOP (UNCHANGED LOGIC)
             # ─────────────────────────────
-            for member in data.get("member", []):
+            for member_position, member in enumerate(data.get("member", []), start=1):
 
                 member_type = member.get("@type")
                 member_id = member.get("@id")
@@ -2191,7 +2211,9 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], target_col
                         parent_id=collection_es_id,
                         parent_path=collection_metadata.get("path"),
                         parent_path_ids=collection_metadata.get("path_ids"),
-                        in_target_branch=in_target_branch
+                        in_target_branch=in_target_branch,
+                        parent_path_order=collection_metadata.get("path_order"),
+                        position=member_position
                     )
 
                 elif member_type == "Resource":
@@ -2215,7 +2237,9 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], target_col
                             data,
                             parent_id=parent_id,
                             parent_path=collection_metadata.get("path"),
-                            parent_path_ids=collection_metadata.get("path_ids")
+                            parent_path_ids=collection_metadata.get("path_ids"),
+                            parent_path_order=collection_metadata.get("path_order"),
+                            position=member_position
                         )
 
                         #10juillet resource_metadata = extract_metadata(

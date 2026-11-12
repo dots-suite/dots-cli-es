@@ -78,6 +78,10 @@
         "type": "keyword"
       },
 
+      "path_order": {
+        "type": "keyword"
+      },
+
       "collections": {
         "type": "nested",
         "properties": {

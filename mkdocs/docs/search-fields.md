@@ -41,7 +41,7 @@ Two groupings drive the Elasticsearch paths:
   queried;
 - `SORTABLE_FAMILIES = METADATA_FAMILIES + (DTS,)`.
 
-The registry is organised in blocks: CLI navigation fields (`parent_id`, `path`, `path_ids`,
+The registry is organised in blocks: CLI navigation fields (`parent_id`, `path_ids`,
 `ancestors`), DTS fields (`id`, `type`, `title`, `description`, `download`, `content`), Dublin Core,
 schema.org, DoTS extensions, and finally temporal range facets generated from ThunderDots output.
 
