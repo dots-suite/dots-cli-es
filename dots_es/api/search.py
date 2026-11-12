@@ -426,32 +426,12 @@ def get_resource_titles(resource_index: str, resource_ids) -> dict:
     }
 
 
-def collect_resource_ids(index: str, query: dict) -> list:
-    """
-    Ids of the resources matching a resource query.
-
-    Granularities run on FRAGMENT_INDEX, which carries no resource_metadata: a
-    resource-scoped search resolves the matching resources to a `resource_id`
-    filter this way.
-    """
-    # shortcut: the terms aggregation is capped at RESOURCE_HITS_PAGE ids; raise
-    # it if a collection ever matches more resources.
-    result = current_app.elasticsearch.search(index=index, body={
-        "size": 0,
-        "query": query,
-        "aggregations": {
-            "ids": {"terms": {"field": "resource_id", "size": RESOURCE_HITS_PAGE}}
-        }
-    })
-
-    return [bucket["key"] for bucket in result["aggregations"]["ids"]["buckets"]]
-
-
 # Facet of the resources: values "id###title", like the collections facet
 RESOURCES_FACET = "resources"
 RESOURCES_FACET_SIZE = 1000
 
-GRANULARITIES_SIZE = 100
+# Max number of fragment types listed in citeTypes
+CITE_TYPES_SIZE = 100
 
 
 def build_resource_facet_clause(values) -> dict:
@@ -502,12 +482,9 @@ def extract_resources_facet(aggregations: dict, resource_index: str) -> list:
     return values
 
 
-def build_granularities_body(must: list | None = None, filters: list | None = None) -> dict:
+def build_fragment_citeTypes_body(must: list | None = None, filters: list | None = None) -> dict:
     """
-    ES body of the citeType aggregation: the fragment types a fragment search
-    can offer, restricted to the caller's clauses (query term, facets, ranges,
-    perimeter). It runs on FRAGMENT_INDEX, which carries no resource_metadata:
-    a resource-scoped search passes a `resource_id` filter instead.
+    ES body counting the fragment types (citeType) matching the search clauses.
     """
     return {
         "size": 0,
@@ -518,19 +495,18 @@ def build_granularities_body(must: list | None = None, filters: list | None = No
             }
         },
         "aggregations": {
-            "cite_types": {"terms": {"field": "citeType", "size": GRANULARITIES_SIZE}}
+            "cite_types": {"terms": {"field": "citeType", "size": CITE_TYPES_SIZE}}
         }
     }
 
 
-def get_granularities(index: str, must: list | None = None, filters: list | None = None) -> list:
+def get_fragment_citeTypes(index: str, must: list | None = None, filters: list | None = None) -> list:
     """
-    Fragment types (citeType) matching the search clauses, so each count equals
-    the results the level would return.
+    Fragment types of the results, with their number of fragments.
     """
     result = current_app.elasticsearch.search(
         index=index,
-        body=build_granularities_body(must, filters)
+        body=build_fragment_citeTypes_body(must, filters)
     )
 
     return [
@@ -664,11 +640,16 @@ def register_search_endpoint(
         # Same for the "resources" facet
         with_resources = RESOURCES_FACET not in excluded_facets
 
-        # Fragment types listed by a fragment search (granularity), e.g. "acte"
+        # Fragment types and levels a fragment search is restricted to
         cite_types = [c.strip() for c in (request.args.get("citeType") or "").split(",") if c.strip()]
 
-        if cite_types and scope != "fragment":
-            return Response("citeType requires scope=fragment", status=400)
+        try:
+            levels = [int(l) for l in (request.args.get("level") or "").split(",") if l.strip()]
+        except ValueError:
+            return Response("level must be a comma-separated list of integers", status=400)
+
+        if (cite_types or levels) and scope != "fragment":
+            return Response("citeType and level require scope=fragment", status=400)
 
         query_param: str = request.args.get("query", None)
         patterns = extract_highlight_patterns(query_param)
@@ -770,10 +751,6 @@ def register_search_endpoint(
         # aggregation can exclude it and count what each value would add.
         facet_clauses = {}
 
-        # Scope of the citeType aggregation, set by each search case below.
-        granularity_must = []
-        granularity_filters = []
-
         try:
 
             # === CAS 3 : Fragment search, notice or full-text, one hit per fragment ===
@@ -824,8 +801,11 @@ def register_search_endpoint(
                 else:
                     body_query["query"]["bool"]["must"].append({"match_all": {}})
 
-                # Granularity: only the fragments of the requested types
-                level_filters = [{"terms": {"citeType": cite_types}}] if cite_types else []
+                level_filters = []
+                if cite_types:
+                    level_filters.append({"terms": {"citeType": cite_types}})
+                if levels:
+                    level_filters.append({"terms": {"level": levels}})
                 body_query["query"]["bool"]["filter"].extend(level_filters)
 
                 # Facets without any value on these fragments are not returned
@@ -872,10 +852,7 @@ def register_search_endpoint(
                     )
                 )
 
-                # Granularity: every clause, except the granularity levels
-                # themselves, so all types stay selectable.
-                granularity_must = base_must
-                granularity_filters = [c for c in base_filters if c not in level_filters]
+                cite_types_clauses = (base_must, base_filters)
 
                 if with_resources:
                     # Counts fragments; the selected resources do not narrow their own facet
@@ -1122,15 +1099,6 @@ def register_search_endpoint(
                         [build_open_range(r) for r in ranges]
                     )
 
-                # Granularities run on FRAGMENT_INDEX: resolve the resources
-                # matching the notice query, the facets and the ranges to a
-                # resource_id filter.
-                granularity_filters = [{
-                    "terms": {
-                        "resource_id": collect_resource_ids(resource_index, body_query["query"])
-                    }
-                }]
-
                 search_result = current_app.elasticsearch.search(index=resource_index, body=body_query)
                 print('\nbody_query')
                 print(body_query)
@@ -1322,16 +1290,6 @@ def register_search_endpoint(
                         excluded_facets
                     )
                 )
-
-                # Granularities run on FRAGMENT_INDEX: keep the text query on
-                # the fragments and restrict to the resources matching the
-                # resource-level filters (resolved to ids).
-                granularity_must = fragment_query["bool"]["must"]
-                granularity_filters = fragment_query["bool"]["filter"] + [{
-                    "terms": {
-                        "resource_id": collect_resource_ids(resource_index, body_query["query"])
-                    }
-                }]
 
                 if with_collections:
                     # The selected collections do not narrow their own facet
@@ -1525,11 +1483,8 @@ def register_search_endpoint(
             )
 
             r["scope"] = scope
-            # Granularities reflect the same query, facets and ranges as the
-            # results, so each count equals what selecting the level would return.
-            r["granularities"] = get_granularities(
-                index, granularity_must, granularity_filters
-            )
+            if scope == "fragment":
+                r["citeTypes"] = get_fragment_citeTypes(index, *cite_types_clauses)
             r["duration"] = float('%.4f' % (time.time() - start_time))
 
         except Exception as e:
