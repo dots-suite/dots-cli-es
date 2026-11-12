@@ -24,8 +24,10 @@ dots-es-cli [--config local|staging|prod] index [--collections id1,id2]
 !!! info "Fragments come from ThunderDots, not from TEI parsing here"
     Passages are built **only** from the pre-normalised `fragments` returned by ThunderDots
     (`fragment_mode="navigation"`): no TEI parsing and no navigation index are performed in this
-    project. A resource with no fragments falls back to a single `__fulltext__` passage built from its
-    plain text.
+    project. For a resource without navigation, ThunderDots returns a single `__DOCUMENT__` fragment
+    holding its whole text: it is indexed at level 1 with the `text` citeType, and takes the title,
+    metadata and dates of its resource. A resource with no fragment at all falls back to a single
+    `__fulltext__` passage built from its plain text.
 
     A fragment carries `id`, `level`, `head`, `content`, `citeType`, `parent`, its own `metadata`
     (`dublincore` and `extensions` from the DTS navigation member, `tei` from

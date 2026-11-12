@@ -1289,6 +1289,26 @@ def apply_collection_scope(doc: dict, scopes: dict) -> dict:
     return doc
 
 
+# Fragment ThunderDots returns for a resource without navigation: the whole text
+WHOLE_DOCUMENT_ID = "__DOCUMENT__"
+
+
+def whole_document_fields(resource_metadata: dict, resource_temporal: dict) -> dict:
+    """
+    Level, type, title, metadata and dates of a whole-document fragment, taken from its resource.
+    """
+    return {
+        "citeType": "text",
+        "level": 1,
+        "title": resource_metadata.get("title"),
+        "fragment_metadata": extract_fragment_metadata({"metadata": {
+            "dublincore": resource_metadata.get("dublincore"),
+            "extensions": resource_metadata.get("extensions"),
+        }}),
+        "fragment_temporal": resource_temporal,
+    }
+
+
 async def index_resource_passages_async(
     app,
     resource_id: str,
@@ -1400,6 +1420,10 @@ async def index_resource_passages_async(
                 # Resource metadata, dates and collections live in RESOURCE_INDEX only
                 "collection_facets": build_collection_facets(collection_metadata)
             }
+
+            # A resource without fragments is searchable at level 1 like any other text
+            if passage_id == WHOLE_DOCUMENT_ID:
+                document_passage.update(whole_document_fields(resource_metadata, temporal))
 
             passages.append(document_passage)
             app.index_stats["passages"] += 1
