@@ -431,7 +431,7 @@ RESOURCES_FACET = "resources"
 RESOURCES_FACET_SIZE = 1000
 
 # Facets of the fragment structure, at fragment scope: their key and the field they count
-STRUCTURE_FACETS = {"citeTypes": "citeType", "levels": "level"}
+STRUCTURE_FACETS = {"citeType": "citeType", "level": "level"}
 STRUCTURE_FACET_SIZE = 100
 
 
@@ -872,10 +872,10 @@ def register_search_endpoint(
                     )
                 )
 
-                # citeTypes always, levels when the search is restricted to some levels
+                # citeType always, level when the search is restricted to some levels
                 structure_facets = [
                     key for key in STRUCTURE_FACETS
-                    if key not in excluded_facets and (key != "levels" or levels)
+                    if key not in excluded_facets and (key != "level" or levels)
                 ]
 
                 for key in structure_facets:
