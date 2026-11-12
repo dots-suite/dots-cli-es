@@ -225,6 +225,9 @@ resources of the collection at resource scope, the fragments of the collection a
 `citeType` at fragment scope. A query or a selection can empty a facet, never remove it, so a
 collection only shows the facets its data fills.
 
+A facet returns all its values, up to `FACET_SIZE` (15 000) per facet, collections and resources
+included. A facet that reaches it is logged as truncated by the API: raise `FACET_SIZE` then.
+
 Buckets are computed under the field `id` and republished to clients under the canonical `key`
 (`dct:creator` → `dublinCore.creator`).
 

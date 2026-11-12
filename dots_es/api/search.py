@@ -17,6 +17,8 @@ from dots_es.api.temporal import (
 )
 
 from dots_es.api.search_fields import (
+    FACET_SIZE,
+    warn_truncated_facets,
     build_self_excluded_facet_aggs,
     build_facet_presence_agg,
     extract_searchfield_facets,
@@ -440,11 +442,9 @@ def first_path_order(bucket: dict):
 
 # Facet of the resources: values "id###title", like the collections facet
 RESOURCES_FACET = "resources"
-RESOURCES_FACET_SIZE = 1000
 
 # Facets of the fragment structure, at fragment scope: their key and the field they count
 STRUCTURE_FACETS = {"citeType": "citeType", "level": "level"}
-STRUCTURE_FACET_SIZE = 100
 
 
 def build_resource_facet_clause(values) -> dict:
@@ -465,7 +465,7 @@ def build_resources_facet_agg(must: list, filters: list) -> dict:
                 "filter": {"bool": {"must": must, "filter": filters}},
                 "aggs": {
                     "values": {
-                        "terms": {"field": "resource_id", "size": RESOURCES_FACET_SIZE},
+                        "terms": {"field": "resource_id", "size": FACET_SIZE},
                         "aggs": FIRST_PATH_ORDER_AGG
                     }
                 }
@@ -513,7 +513,7 @@ def build_structure_facet_agg(field: str, must: list, filters: list) -> dict:
         "aggs": {
             "filtered": {
                 "filter": {"bool": {"must": must, "filter": filters}},
-                "aggs": {"values": {"terms": {"field": field, "size": STRUCTURE_FACET_SIZE}}}
+                "aggs": {"values": {"terms": {"field": field, "size": FACET_SIZE}}}
             }
         }
     }
@@ -950,7 +950,7 @@ def register_search_endpoint(
                                     "values": {
                                         "terms": {
                                             "field": "collection_facets",
-                                            "size": 1000
+                                            "size": FACET_SIZE
                                         },
                                         "aggs": FIRST_PATH_ORDER_AGG
                                     }
@@ -976,6 +976,8 @@ def register_search_endpoint(
                     )
 
                 search_result = current_app.elasticsearch.search(index=index, body=body_query)
+
+                warn_truncated_facets(search_result.get("aggregations"))
 
                 resource_titles = get_resource_titles(
                     resource_index,
@@ -1138,7 +1140,7 @@ def register_search_endpoint(
                                     "values": {
                                         "terms": {
                                             "field": "collection_facets",
-                                            "size": 1000
+                                            "size": FACET_SIZE
                                         },
                                         "aggs": FIRST_PATH_ORDER_AGG
                                     }
@@ -1182,6 +1184,8 @@ def register_search_endpoint(
                     )
 
                 search_result = current_app.elasticsearch.search(index=resource_index, body=body_query)
+
+                warn_truncated_facets(search_result.get("aggregations"))
                 print('\nbody_query')
                 print(body_query)
 
@@ -1389,7 +1393,7 @@ def register_search_endpoint(
                                     "values": {
                                         "terms": {
                                             "field": "collection_facets",
-                                            "size": 1000
+                                            "size": FACET_SIZE
                                         },
                                         "aggs": FIRST_PATH_ORDER_AGG
                                     }
@@ -1416,6 +1420,8 @@ def register_search_endpoint(
                 )
 
                 search_result = current_app.elasticsearch.search(index=resource_index, body=body_query)
+
+                warn_truncated_facets(search_result.get("aggregations"))
 
                 # 3. Highlighted fragments of the page's resources
                 page_ids = [hit["_source"]["resource_id"] for hit in search_result["hits"]["hits"]]

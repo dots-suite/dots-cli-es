@@ -1,9 +1,28 @@
 # search_fields.py
 
 import re
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+# Values returned per facet: above every facet of the corpus, so that facets are complete
+FACET_SIZE = 15000
+
+
+def warn_truncated_facets(aggregations, path: str = "") -> None:
+    """
+    Log every terms aggregation that left values out (sum_other_doc_count above 0).
+    """
+    if not isinstance(aggregations, dict):
+        return
+
+    if aggregations.get("sum_other_doc_count", 0) > 0:
+        logging.warning("Facet %s truncated: raise FACET_SIZE (%s)", path or "?", FACET_SIZE)
+
+    for key, value in aggregations.items():
+        if isinstance(value, dict):
+            warn_truncated_facets(value, f"{path}.{key}" if path else key)
 
 
 class SearchFieldType(str, Enum):
@@ -806,7 +825,7 @@ def build_self_excluded_facet_aggs(
                         "values": {
                             "terms": {
                                 "field": facet_es_field(field, scope),
-                                "size": 15000
+                                "size": FACET_SIZE
                             }
                         }
                     }
