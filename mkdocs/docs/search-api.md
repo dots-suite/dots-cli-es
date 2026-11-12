@@ -111,11 +111,20 @@ At fragment scope, `citeType` and `level` restrict the results to some fragment 
 comma-separated for several (`citeType=partie,acte`, `level=1`). Both can be combined. They are
 refused at resource scope (**HTTP 400**), as is a `level` that is not an integer.
 
-A fragment-scope response carries `citeTypes`, the fragment types of the results with their number of
-fragments: the text query, the facets, the date ranges, `citeType` and `level` narrow them.
+Two facets describe the fragment structure, at fragment scope only:
+
+- `citeTypes`, the fragment types of the results, always computed;
+- `levels`, their levels, computed when `level` restricts the search.
+
+Like `resources`, their values are `value###value` facet keys, selected through `facets`
+(`{"citeTypes": ["acte"]}`) with OR logic, and each one is counted against every clause but its own
+selection. A structure facet with a single value offers no choice and is not returned.
 
 ```json
-"citeTypes": [{"citeType": "acte", "count": 12288}, {"citeType": "partie", "count": 266}]
+"citeTypes": [
+  {"id": "acte", "label": "acte", "count": 13255, "facet_key": "acte###acte"},
+  {"id": "partie", "label": "partie", "count": 199, "facet_key": "partie###partie"}
+]
 ```
 
 ### Grouping by sub-collection or resource
@@ -137,10 +146,10 @@ together across pages; each result carries `path` and `path_ids` to build the gr
 | `scope` | `resource` | `resource` or `fragment`, see [above](#resource-or-fragment-scope). |
 | `collectionId` | none | Scopes the search to a collection subtree; also drives `collection_indexed` in the response. |
 | `collections` | none | `[a,b]` list of collection keys to **remove** from the returned collection facets. |
-| `facets` | none | JSON object `{canonical_key: [values]}` of selected facet values. `collections` and `resources` use OR logic; every other facet uses AND. |
+| `facets` | none | JSON object `{canonical_key: [values]}` of selected facet values. `collections`, `resources`, `citeTypes` and `levels` use OR logic; every other facet uses AND. |
 | `citeType` | none | Fragment types listed at fragment scope, see [Fragment types and levels](#fragment-types-and-levels). |
 | `level` | none | Fragment levels listed at fragment scope, same section. |
-| `excludeFacets` <sup>*</sup> | none | Comma-separated canonical keys not to compute or return. `collections` and `resources` are valid values. |
+| `excludeFacets` <sup>*</sup> | none | Comma-separated canonical keys not to compute or return. `collections`, `resources`, `citeTypes` and `levels` are valid values. |
 | `excludeTemporalFacets` <sup>*</sup> | none | Same, for temporal range facets. |
 | `range[<field>]` | none | Repeated-key syntax, e.g. `range[temporal.temporal.dublincore.created_start]=gte:1200,lte:1300`. Operators: `gt`, `gte`, `lt`, `lte`. See [Date ranges](#date-ranges). |
 | `filters` | none | `field:value1\|value2,field2:value3` — one clause per comma, values within a field joined with `OR`. Each clause becomes a `query_string` restricted to that field. |

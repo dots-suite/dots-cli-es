@@ -430,8 +430,9 @@ def get_resource_titles(resource_index: str, resource_ids) -> dict:
 RESOURCES_FACET = "resources"
 RESOURCES_FACET_SIZE = 1000
 
-# Max number of fragment types listed in citeTypes
-CITE_TYPES_SIZE = 100
+# Facets of the fragment structure, at fragment scope: their key and the field they count
+STRUCTURE_FACETS = {"citeTypes": "citeType", "levels": "level"}
+STRUCTURE_FACET_SIZE = 100
 
 
 def build_resource_facet_clause(values) -> dict:
@@ -482,36 +483,45 @@ def extract_resources_facet(aggregations: dict, resource_index: str) -> list:
     return values
 
 
-def build_fragment_citeTypes_body(must: list | None = None, filters: list | None = None) -> dict:
+def build_structure_facet_clause(field: str, values) -> dict:
     """
-    ES body counting the fragment types (citeType) matching the search clauses.
+    Filter on the selected values ("value###label" facet keys) of a structure facet: any of them.
+    """
+    return {"terms": {field: [value.partition("###")[0] for value in values]}}
+
+
+def build_structure_facet_agg(field: str, must: list, filters: list) -> dict:
+    """
+    Structure facet counted against every clause but its own selection.
     """
     return {
-        "size": 0,
-        "query": {
-            "bool": {
-                "must": must or [],
-                "filter": filters or [],
+        "global": {},
+        "aggs": {
+            "filtered": {
+                "filter": {"bool": {"must": must, "filter": filters}},
+                "aggs": {"values": {"terms": {"field": field, "size": STRUCTURE_FACET_SIZE}}}
             }
-        },
-        "aggregations": {
-            "cite_types": {"terms": {"field": "citeType", "size": CITE_TYPES_SIZE}}
         }
     }
 
 
-def get_fragment_citeTypes(index: str, must: list | None = None, filters: list | None = None) -> list:
+def extract_structure_facet(aggregation: dict) -> list:
     """
-    Fragment types of the results, with their number of fragments.
+    Values of a structure facet; a single value offers no choice and returns none.
     """
-    result = current_app.elasticsearch.search(
-        index=index,
-        body=build_fragment_citeTypes_body(must, filters)
-    )
+    buckets = aggregation["filtered"]["values"]["buckets"]
+
+    if len(buckets) < 2:
+        return []
 
     return [
-        {"citeType": bucket["key"], "count": bucket["doc_count"]}
-        for bucket in result["aggregations"]["cite_types"]["buckets"]
+        {
+            "id": str(bucket["key"]),
+            "label": str(bucket["key"]),
+            "count": bucket["doc_count"],
+            "facet_key": f"{bucket['key']}###{bucket['key']}"
+        }
+        for bucket in buckets
     ]
 
 
@@ -688,6 +698,10 @@ def register_search_endpoint(
             except json.JSONDecodeError:
                 selected_facets = {}
 
+        # Structure facets only exist at fragment scope
+        if scope != "fragment":
+            selected_facets = {k: v for k, v in selected_facets.items() if k not in STRUCTURE_FACETS}
+
 
         no_highlight = isinstance(request.args.get("no-highlight", False), str)
 
@@ -820,6 +834,8 @@ def register_search_endpoint(
                     if es_filters:
                         body_query["query"]["bool"]["filter"].extend(es_filters)
 
+                structure_clauses = {}
+
                 for facet_field, values in selected_facets.items():
                     if not values:
                         continue
@@ -827,6 +843,10 @@ def register_search_endpoint(
                     if facet_field == RESOURCES_FACET:
                         clause = build_resource_facet_clause(values)
                         resource_facet_filters.append(clause)
+                    elif facet_field in STRUCTURE_FACETS:
+                        clause = build_structure_facet_clause(STRUCTURE_FACETS[facet_field], values)
+                        structure_clauses[facet_field] = clause
+                        other_filters.append(clause)
                     else:
                         clause = build_facet_clause(
                             get_facet_es_field(facet_field, scope),
@@ -852,7 +872,19 @@ def register_search_endpoint(
                     )
                 )
 
-                cite_types_clauses = (base_must, base_filters)
+                # citeTypes always, levels when the search is restricted to some levels
+                structure_facets = [
+                    key for key in STRUCTURE_FACETS
+                    if key not in excluded_facets and (key != "levels" or levels)
+                ]
+
+                for key in structure_facets:
+                    own = structure_clauses.get(key)
+                    body_query["aggregations"][f"{key}_fac"] = build_structure_facet_agg(
+                        STRUCTURE_FACETS[key],
+                        list(base_must),
+                        [c for c in base_filters if c is not own]
+                    )
 
                 if with_resources:
                     # Counts fragments; the selected resources do not narrow their own facet
@@ -944,6 +976,11 @@ def register_search_endpoint(
 
                 if with_resources:
                     facets[RESOURCES_FACET] = extract_resources_facet(search_result["aggregations"], resource_index)
+
+                for key in structure_facets:
+                    values = extract_structure_facet(search_result["aggregations"][f"{key}_fac"])
+                    if values:
+                        facets[key] = values
 
                 if with_collections:
                     facets["collections"] = []
@@ -1483,8 +1520,6 @@ def register_search_endpoint(
             )
 
             r["scope"] = scope
-            if scope == "fragment":
-                r["citeTypes"] = get_fragment_citeTypes(index, *cite_types_clauses)
             r["duration"] = float('%.4f' % (time.time() - start_time))
 
         except Exception as e:
