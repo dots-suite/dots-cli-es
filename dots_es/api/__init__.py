@@ -58,4 +58,10 @@ def create_app(config_name: str):
         register_search_endpoint(api_bp, "1.0", compose_result)
         app.register_blueprint(api_bp)
 
+    # Errors too, so that a browser client can read them
+    @app.after_request
+    def allow_any_origin(response):
+        response.headers.setdefault("Access-Control-Allow-Origin", "*")
+        return response
+
     return app
