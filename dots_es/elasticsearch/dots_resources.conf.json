@@ -78,7 +78,7 @@
         "type": "keyword"
       },
 
-      "path_order": {
+      "corpus_order": {
         "type": "keyword"
       },
 

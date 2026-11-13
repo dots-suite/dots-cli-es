@@ -84,8 +84,8 @@ At fragment scope:
   lists the acts from the oldest to the most recent, and `total_count` counts fragments. Each item
   carries `passage_id`, `title`, `level`, `citeType`, `ancestors`, its `metadata`
   (`fragment_metadata`), its unflattened `temporal`, `highlight.content`, and, for display,
-  `resource_id`, `resource_title`, `path_ids`, `path_order` and `collection_facets`;
-- **the default sort** is the score, then the corpus order (`path_order`), which also breaks ties
+  `resource_id`, `resource_title`, `path_ids`, `corpus_order` and `collection_facets`;
+- **the default sort** is the score, then the corpus order (`corpus_order`), which also breaks ties
   after an explicit `sort`: without a query, fragments come in the order of the corpus;
 - **metadata facets** are the same facets as at resource scope, read in `fragment_metadata` and
   counting fragments; `facets={"dublinCore.language": ["lat"]}` filters on the fragment's language.
@@ -129,12 +129,12 @@ selection. A structure facet with a single value offers no choice and is not ret
 
 ### Corpus order
 
-Resources and fragments carry `path_order`, the position of each collection in its parent, then of
+Resources and fragments carry `corpus_order`, the position of each collection in its parent, then of
 the resource, then, on fragments, of the fragment in its resource, as six-digit segments
-(`000001/000003/000024/000001`). Sorting on it (`sort=path_order`) lists them in the order of the
+(`000001/000003/000024/000001`). Sorting on it (`sort=corpus_order`) lists them in the order of the
 corpus, as the tables of contents show it; it is also the last resort of every sort.
 
-The values of the `collections` and `resources` facets carry the smallest `path_order` of their
+The values of the `collections` and `resources` facets carry the smallest `corpus_order` of their
 documents, so that a client can list them in corpus order.
 
 ## Query parameters
@@ -157,7 +157,7 @@ documents, so that a client can list them in corpus order.
 | `filters` | none | `field:value1\|value2,field2:value3` — one clause per comma, values within a field joined with `OR`. Each clause becomes a `query_string` restricted to that field. |
 | `page[number]` | `1` | Offset pagination. |
 | `page[size]` | `SEARCH_RESULT_PER_PAGE` (200) | **Minimum 25**, no maximum. |
-| `sort` | `dublinCore.created` ascending, then `_score` descending (resource full text); `_score` elsewhere; `path_order` last | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
+| `sort` | `dublinCore.created` ascending, then `_score` descending (resource full text); `_score` elsewhere; `corpus_order` last | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
 
 <sup>*</sup> These two parameters exist mainly for the
 [dots-vue](https://github.com/dots-suite/dots-vue) front-end and the per-collection settings it

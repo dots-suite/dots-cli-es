@@ -429,15 +429,15 @@ def get_resource_titles(resource_index: str, resource_ids) -> dict:
 
 
 # Corpus order, the last resort of every sort
-PATH_ORDER_SORT = {"path_order": {"order": "asc", "missing": "_last", "unmapped_type": "keyword"}}
+CORPUS_ORDER_SORT = {"corpus_order": {"order": "asc", "missing": "_last", "unmapped_type": "keyword"}}
 
-# Smallest path_order of the documents carrying a facet value: where it first appears in the corpus
-FIRST_PATH_ORDER_AGG = {"first": {"top_hits": {"size": 1, "sort": [PATH_ORDER_SORT], "_source": ["path_order"]}}}
+# Smallest corpus_order of the documents carrying a facet value: where it first appears in the corpus
+FIRST_CORPUS_ORDER_AGG = {"first": {"top_hits": {"size": 1, "sort": [CORPUS_ORDER_SORT], "_source": ["corpus_order"]}}}
 
 
-def first_path_order(bucket: dict):
+def first_corpus_order(bucket: dict):
     hits = bucket.get("first", {}).get("hits", {}).get("hits", [])
-    return hits[0]["_source"].get("path_order") if hits else None
+    return hits[0]["_source"].get("corpus_order") if hits else None
 
 
 # Facet of the resources: values "id###title", like the collections facet
@@ -466,7 +466,7 @@ def build_resources_facet_agg(must: list, filters: list) -> dict:
                 "aggs": {
                     "values": {
                         "terms": {"field": "resource_id", "size": FACET_SIZE},
-                        "aggs": FIRST_PATH_ORDER_AGG
+                        "aggs": FIRST_CORPUS_ORDER_AGG
                     }
                 }
             }
@@ -491,7 +491,7 @@ def extract_resources_facet(aggregations: dict, resource_index: str) -> list:
             "label": label,
             "count": bucket["doc_count"],
             "facet_key": f"{bucket['key']}###{label}",
-            "path_order": first_path_order(bucket)
+            "corpus_order": first_corpus_order(bucket)
         })
 
     return values
@@ -829,7 +829,7 @@ def register_search_endpoint(
                         "citeType",
                         "ancestors",
                         "path_ids",
-                        "path_order",
+                        "corpus_order",
                         "collection_facets",
                         "fragment_metadata",
                         "fragment_temporal"
@@ -838,7 +838,7 @@ def register_search_endpoint(
                     "highlight": HIGHLIGHT_CONFIG,
                     # Ties (no query, equal scores) keep the document order
                     "sort": (sort_criteriae or [{"_score": "desc"}]) + [
-                        PATH_ORDER_SORT,
+                        CORPUS_ORDER_SORT,
                         {"resource_id": "asc"},
                         {"passage_id": "asc"}
                     ],
@@ -952,7 +952,7 @@ def register_search_endpoint(
                                             "field": "collection_facets",
                                             "size": FACET_SIZE
                                         },
-                                        "aggs": FIRST_PATH_ORDER_AGG
+                                        "aggs": FIRST_CORPUS_ORDER_AGG
                                     }
                                 }
                             }
@@ -992,7 +992,7 @@ def register_search_endpoint(
                     results.append({
                         "resource_id": source.get("resource_id"),
                         "resource_title": resource_titles.get(source.get("resource_id")),
-                        "path_order": source.get("path_order"),
+                        "corpus_order": source.get("corpus_order"),
                         "collection_facets": source.get("collection_facets", []),
                         "path_ids": source.get("path_ids", []),
                         "passage_id": source.get("passage_id"),
@@ -1038,7 +1038,7 @@ def register_search_endpoint(
                             "label": label or coll_id,
                             "count": bucket["doc_count"],
                             "facet_key": bucket["key"],
-                            "path_order": first_path_order(bucket)
+                            "corpus_order": first_corpus_order(bucket)
                         })
 
                 r = {
@@ -1072,7 +1072,7 @@ def register_search_endpoint(
                         "resource_metadata",
                         "temporal"
                     ],
-                    "sort": (sort_criteriae or [{"_score": "desc"}]) + [PATH_ORDER_SORT],
+                    "sort": (sort_criteriae or [{"_score": "desc"}]) + [CORPUS_ORDER_SORT],
                     "from": (num_page - 1) * page_size,
                     "size": page_size,
                     "track_total_hits": True,
@@ -1142,7 +1142,7 @@ def register_search_endpoint(
                                             "field": "collection_facets",
                                             "size": FACET_SIZE
                                         },
-                                        "aggs": FIRST_PATH_ORDER_AGG
+                                        "aggs": FIRST_CORPUS_ORDER_AGG
                                     }
                                 }
                             }
@@ -1214,7 +1214,7 @@ def register_search_endpoint(
                         "label": label,
                         "count": bucket["doc_count"],
                         "facet_key": bucket["key"],
-                        "path_order": first_path_order(bucket)
+                        "corpus_order": first_corpus_order(bucket)
                     })
 
                 temporal_facets = extract_temporal_facets(
@@ -1344,7 +1344,7 @@ def register_search_endpoint(
                         "collections"
                     ],
                     # tri par défaut = date puis score ; sinon les critères demandés
-                    "sort": (sort_criteriae if sort_criteriae else default_sort) + [PATH_ORDER_SORT],
+                    "sort": (sort_criteriae if sort_criteriae else default_sort) + [CORPUS_ORDER_SORT],
                     "from": (num_page - 1) * page_size,
                     "size": page_size,
                     "track_total_hits": True,
@@ -1395,7 +1395,7 @@ def register_search_endpoint(
                                             "field": "collection_facets",
                                             "size": FACET_SIZE
                                         },
-                                        "aggs": FIRST_PATH_ORDER_AGG
+                                        "aggs": FIRST_CORPUS_ORDER_AGG
                                     }
                                 }
                             }
@@ -1482,7 +1482,7 @@ def register_search_endpoint(
                         "label": label,
                         "count": bucket["doc_count"],
                         "facet_key": bucket["key"],
-                        "path_order": first_path_order(bucket)
+                        "corpus_order": first_corpus_order(bucket)
                     })
 
                 if collection_facet:

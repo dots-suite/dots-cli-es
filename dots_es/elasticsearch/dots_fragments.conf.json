@@ -102,7 +102,7 @@
         "term_vector": "with_positions_offsets"
       },
 
-      "path_order": {
+      "corpus_order": {
         "type": "keyword"
       },
 

@@ -52,7 +52,7 @@ without a mapping change:
     lost that way. Dates are indexed on purpose under `temporal` and `fragment_temporal`; every other
     metadata string stays text.
 
-Explicit properties include `resource_id`, `passage_id`, `citeType`, `path_ids`, `path_order`,
+Explicit properties include `resource_id`, `passage_id`, `citeType`, `path_ids`, `corpus_order`,
 `collection_facets` (keyword), `level` (integer), `title` and `content` (`text` / `folding`), the dynamic
 objects `fragment_metadata` and `fragment_temporal`, plus the **nested** object `ancestors`.
 A passage stores no resource metadata: it is looked up in `dots_resources` through `resource_id`.
