@@ -78,6 +78,8 @@ body_tag = re.compile('<body(?:(?:.|\n)*?)>((?:.|\n)*?)</body>')
 app = None
 
 XML_NS = {"tei": "http://www.tei-c.org/ns/1.0"}
+# Deleting a large index can take longer than the httpx default of 5 s
+ES_DELETE_TIMEOUT = 120
 
 ts = datetime.now(timezone.utc).strftime("%Y_%m_%d_%H_%M")
 
@@ -454,14 +456,27 @@ def extract_body(text):
     return text
 
 
+def delete_index(app, index_name):
+    """Delete an index, raising when Elasticsearch refuses; a missing index is only reported."""
+    url = '/'.join([app.config['ELASTICSEARCH_URL'], index_name])
+    print(f"Deleting {index_name} index.")
+    with httpx.Client(auth=es_basic_auth(), timeout=ES_DELETE_TIMEOUT) as client:
+        res = client.delete(url)
+    if res.status_code == 404:
+        print(f"{index_name} n'existe pas, rien à supprimer.")
+        return
+    if not str(res.status_code).startswith("20"):
+        raise RuntimeError(
+            f"❌ {index_name} n'a PAS été supprimé (HTTP {res.status_code}) : {res.text}"
+        )
+
+
 def load_elastic_conf(app, index_name, rebuild=False):
     url = '/'.join([app.config['ELASTICSEARCH_URL'], index_name])
     res = None
     try:
         if rebuild:
-            print(f"Deleting {index_name} index.")
-            with httpx.Client(auth=es_basic_auth()) as client:
-                res = client.delete(url)
+            delete_index(app, index_name)
         with resources.files("dots_es").joinpath("elasticsearch", "_global.conf.json").open('r') as _global:
             global_settings = json.load(_global)
 
@@ -2618,15 +2633,7 @@ def make_cli():
         indexes = indexes or app.all_indexes
 
         for name in indexes.split(','):
-            url = '/'.join([app.config['ELASTICSEARCH_URL'], name])
-            res = None
-            try:
-                print(f"Deleting {name} index.")
-                with httpx.Client(auth=es_basic_auth()) as client:
-                    res = client.delete(url)
-            except Exception as e:
-                print(res.text, str(e), flush=True, end=" ")
-                raise e
+            delete_index(app, name.strip())
 
     @click.command("index")
     @click.option("--collections", "-c", default=None,
