@@ -529,6 +529,159 @@ def update_conf_internal(cli_ctx: CLIContext, indexes=None, rebuild=False):
         if name:
             load_elastic_conf(app, name, rebuild=rebuild)
 
+def split_collection_ids(collections) -> list:
+    """Collection ids of the --collections option, blanks dropped."""
+    return [cid.strip() for cid in (collections or "").split(",") if cid.strip()]
+
+
+def collections_purge_query(collection_ids: list) -> dict:
+    """
+    Every document of the given collections, at any depth: collection_facets
+    lists each ancestor as `id###label`, the prefix the search API filters on.
+    A resource id passed to --collections matches through resource_id.
+    """
+    return {
+        "bool": {
+            "should": [
+                *({"prefix": {"collection_facets": f"{cid}###"}} for cid in collection_ids),
+                {"terms": {"resource_id": collection_ids}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+
+
+def purge_collections(app, es, collection_ids: list):
+    """
+    Delete the documents of the collections about to be reindexed: indexing only
+    adds or overwrites, so resources removed or renamed in DTS would stay searchable.
+    """
+    query = collections_purge_query(collection_ids)
+
+    for index_name in (app.config["FRAGMENT_INDEX"], app.config["RESOURCE_INDEX"]):
+        if not es.indices.exists(index=index_name):
+            continue
+        res = es.options(request_timeout=ES_DELETE_TIMEOUT).delete_by_query(
+            index=index_name,
+            query=query,
+            conflicts="proceed",
+            refresh=True,
+        )
+        print(f"🧹 {index_name} : {res.get('deleted', 0)} documents de {', '.join(collection_ids)} supprimés avant réindexation")
+        if res.get("failures"):
+            raise RuntimeError(f"❌ Purge de {index_name} incomplète : {res['failures'][:3]}")
+
+
+def new_indexation_counts() -> dict:
+    """Documents indexed and refused by Elasticsearch, and why, for one run."""
+    return {
+        "passages": {"indexed": 0, "failed": 0},
+        "resources": {"indexed": 0, "failed": 0},
+        "reasons": {},
+    }
+
+
+def error_reason(error) -> str:
+    """
+    Short and stable cause of a refusal, so that identical refusals add up:
+    a bulk item error (dict), an Elasticsearch ApiError (its body) or any exception.
+    """
+    if isinstance(error, dict):
+        detail = error
+    else:
+        body = getattr(error, "body", None)
+        detail = body.get("error") if isinstance(body, dict) else None
+
+    if isinstance(detail, dict):
+        reason = f"{detail.get('type', 'error')}: {detail.get('reason', '')}"
+    else:
+        reason = f"{type(error).__name__}: {error}"
+
+    # "[1:59] mapping set to strict…": the position differs from one document to the next
+    reason = re.sub(r"\[\d+:\d+\]\s*", "", reason).strip()
+    return reason[:200]
+
+
+def record_failure(counts: dict, kind: str, reason: str):
+    counts[kind]["failed"] += 1
+    counts["reasons"][reason] = counts["reasons"].get(reason, 0) + 1
+
+
+def has_failures(counts: dict) -> bool:
+    return counts["passages"]["failed"] > 0 or counts["resources"]["failed"] > 0
+
+
+def format_indexation_summary(counts: dict, durations: dict, reports: list, purged_collections: list) -> str:
+    """
+    End-of-run summary: what was indexed and refused, why, where the details
+    are, and a verdict that cannot be mistaken for a success.
+    """
+    passages, resources = counts["passages"], counts["resources"]
+    lines = [
+        "",
+        "=" * 60,
+        "📊  Résumé de l’indexation",
+        "=" * 60,
+        f"📄  Passages indexés                  : {passages['indexed']} / {passages['indexed'] + passages['failed']}",
+        f"📁  Ressources indexées               : {resources['indexed']} / {resources['indexed'] + resources['failed']}",
+    ]
+
+    if has_failures(counts):
+        lines += [
+            f"❌  Passages refusés                  : {passages['failed']}",
+            f"❌  Ressources refusées               : {resources['failed']}",
+            "────────────────────────",
+            "Causes des refus :",
+        ]
+        top = sorted(counts["reasons"].items(), key=lambda item: -item[1])[:3]
+        lines += [f"   {count} × {reason}" for reason, count in top]
+
+        unmapped = sorted({
+            field
+            for reason in counts["reasons"]
+            if "strict_dynamic_mapping_exception" in reason
+            for field in re.findall(r"dynamic introduction of \[([^\]]+)\]", reason)
+        })
+        if unmapped:
+            lines.append(
+                f"💡  Champ(s) absent(s) du mapping de l’index : {', '.join(unmapped)}. "
+                "S’il figure dans dots_es/elasticsearch/<index>.conf.json, lancer "
+                "`dots-es-cli --config=<env> update-conf --rebuild` puis réindexer ; "
+                "sinon, l’ajouter d’abord à cette conf."
+            )
+
+        existing = [path for path in reports if os.path.exists(path)]
+        if existing:
+            lines.append("Détail : " + ", ".join(existing))
+
+    lines += [
+        "────────────────────────",
+        f"⏱️  Durée indexation documents        : {format_duration(durations['documents'])}",
+        f"⏱️  Durée indexation fragments        : {format_duration(durations['fragments'])}",
+        f"⏱️  Durée totale d'indexation         : {format_duration(durations['total'])}",
+        "=" * 60,
+    ]
+
+    indexed = passages["indexed"] + resources["indexed"]
+    failed = passages["failed"] + resources["failed"]
+
+    if failed == 0:
+        lines.append("✅  Indexation réussie")
+    elif indexed == 0:
+        lines.append("❌  ÉCHEC : aucun document indexé")
+    else:
+        lines.append(f"⚠️  INDEXATION PARTIELLE : {failed} documents refusés")
+
+    if failed and purged_collections:
+        lines.append(
+            f"⚠️  {', '.join(purged_collections)} purgée(s) avant réindexation : "
+            "les documents refusés n’y sont plus cherchables."
+        )
+
+    lines.append("=" * 60)
+    return "\n".join(lines)
+
+
 def warn_on_mapping_drift(app, es, index_name):
     """
     Signale qu'un index existant ne porte pas le mapping de son fichier de conf.
@@ -2659,6 +2812,7 @@ def make_cli():
         print('index collections:', collections)
         print('index _index_name:', app.config['FRAGMENT_INDEX'])
         print('index _index_name:', app.config['RESOURCE_INDEX'])
+        crawl_failed = False
         try:
             asyncio.run(dotsplorer(
                 app=app,
@@ -2666,6 +2820,7 @@ def make_cli():
             ))
 
         except Exception as e:
+            crawl_failed = True
             print('dotsplorer error (collections): ', str(e))
 
 
@@ -2691,6 +2846,18 @@ def make_cli():
         # Lister tous les fichiers JSONL dans /out
         all_files = [f for f in os.listdir(out_dir) if f.endswith(".jsonl")]
 
+        # Purge only once the crawl has produced something to index: a failed
+        # crawl must not empty the collections it was meant to refresh.
+        collection_ids = split_collection_ids(collections)
+        if collection_ids:
+            if not all_files:
+                print("⚠️ Aucun fichier JSONL produit par le crawl : purge et indexation annulées.")
+                return
+            if crawl_failed:
+                print("⚠️ Crawl interrompu : pas de purge, les documents déjà indexés sont conservés.")
+            else:
+                purge_collections(app, es, collection_ids)
+
         # Union the collections of every resource before indexing: otherwise
         # the last branch written overwrites the branches seen before it.
         collection_scopes = collect_resource_collection_scopes(out_dir)
@@ -2707,6 +2874,7 @@ def make_cli():
         # 1 Indexer les passages
         # -----------------------------
         start_fragments_indexation = time.perf_counter()
+        counts = new_indexation_counts()
 
         passage_files = [f for f in all_files if f.endswith("_passages.jsonl")]
         for passage_file in passage_files:
@@ -2743,6 +2911,7 @@ def make_cli():
                             #     "upsert": doc
                             # })
                         except Exception as e:
+                            record_failure(counts, "passages", error_reason(e))
                             report_passage_indexation_errors(
                                 app,
                                 resource_id=doc.get("resource_id", "*"),
@@ -2753,12 +2922,19 @@ def make_cli():
                         try:
                             response = app.elasticsearch.bulk(body=bulk_actions, refresh=False)
                         except Exception as e:
+                            # The whole request failed: none of its passages is indexed
+                            for _ in range(len(bulk_actions) // 2):
+                                record_failure(counts, "passages", error_reason(e))
                             report_passage_indexation_errors(app, resource_id="*", passage_id="*", error=e)
                         else:
+                            for item in response.get("items", []):
+                                if "error" not in item.get("index", {}):
+                                    counts["passages"]["indexed"] += 1
                             if response.get("errors"):
                                 for item in response.get("items", []):
                                     action = item.get("index", {})
                                     if "error" in action:
+                                        record_failure(counts, "passages", error_reason(action["error"]))
                                         es_id = action.get("_id", "")
                                         passage_id = es_id.split("::", 1)[1] if "::" in es_id else es_id
                                         resource_id = es_id.split("::", 1)[0] if "::" in es_id else "*"
@@ -2800,7 +2976,9 @@ def make_cli():
                         )
                         indexed_resources.add(doc.get("resource_id"))
                         app.index_stats["resources_indexed"] = app.index_stats.get("resources_indexed", 0) + 1
+                        counts["resources"]["indexed"] += 1
                     except Exception as e:
+                        record_failure(counts, "resources", error_reason(e))
                         report_resource_indexation_errors(app, resource_id=doc.get("resource_id", "*"), error=e)
 
         end_documents_indexation = time.perf_counter()
@@ -2829,13 +3007,21 @@ def make_cli():
                 "duration_hms": format_duration(_duration),
             })
 
-        print("\n" + "=" * 60)
-        print("📊  Résumé de l’indexation")
-        print("=" * 60)
-        # print(f"❌  Erreurs ES (bulk)                    : ")#{ app.index_stats["bulk_es_errors"] }
-        print(f"📁  Durée indexation documents          : { timer_documents_indexation }")
-        print(f"📄  Durée indexation fragments          : { timer_fragments_indexation }")
-        print(f"🧩  Durée totale d'indexation           : { timer_total_indexation }")
+        csv_paths = get_indexation_csv_paths(app)
+        print(format_indexation_summary(
+            counts,
+            durations={
+                "documents": timer_documents_indexation,
+                "fragments": timer_fragments_indexation,
+                "total": timer_total_indexation,
+            },
+            reports=[csv_paths["passage_exceptions"], csv_paths["document_exceptions"]],
+            purged_collections=collection_ids if not crawl_failed else [],
+        ))
+
+        # A failed run must fail for the shell and the scripts that chain it
+        if has_failures(counts):
+            raise SystemExit(1)
 
 
 

@@ -30,7 +30,7 @@ Crawls the DTS tree through ThunderDots and populates both indexes. See [Indexin
 
 | Option | Default | Effect |
 |---|---|---|
-| `--collections`, `-c` | none | Comma-separated collection ids to restrict the crawl. **Case-sensitive**. |
+| `--collections`, `-c` | none | Comma-separated collection ids to restrict the crawl. **Case-sensitive**. Their documents already in both indexes are purged first, so resources removed or renamed in DTS disappear from the search. |
 
 ```bash
 dots-es-cli --config=local index

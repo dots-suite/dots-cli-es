@@ -17,9 +17,16 @@ dots-es-cli [--config local|staging|prod] index [--collections id1,id2]
    is created from the [mapping files](elasticsearch.md); if present, a
    [mapping-drift warning](elasticsearch.md#mapping-drift) is printed when the live `dynamic` setting
    differs from the conf.
-4. **Bulk-index passages** into `FRAGMENT_INDEX`, with `_id = "{resource_id}::{passage_id}"`.
-5. **Index resource documents** into `RESOURCE_INDEX`, one by one.
-6. **Print a summary** and write the [CSV reports](reporting.md).
+4. **Purge the reindexed collections** (only with `--collections`). Before indexing, every passage
+   and resource of the given collections is deleted from both indexes, at any depth (a prefix
+   `{id}###` on `collection_facets`, the filter the search API applies; a resource id matches
+   through `resource_id`). Indexing only adds or overwrites documents, so without this purge a
+   resource removed or renamed in DTS would stay searchable and its links would answer a DTS 400.
+   The purge is skipped if the crawl failed, and nothing is purged nor indexed if the crawl wrote
+   no JSONL file.
+5. **Bulk-index passages** into `FRAGMENT_INDEX`, with `_id = "{resource_id}::{passage_id}"`.
+6. **Index resource documents** into `RESOURCE_INDEX`, one by one.
+7. **Print a summary** and write the [CSV reports](reporting.md).
 
 !!! info "Fragments come from ThunderDots, not from TEI parsing here"
     Passages are built **only** from the pre-normalised `fragments` returned by ThunderDots
@@ -54,7 +61,7 @@ the same `build_filtered_temporal_metadata()`.
 
 | Option | Default | Effect |
 |---|---|---|
-| `--collections` / `-c` | *none* | Comma-separated collection ids, **case-sensitive** (`ENCPOS`, not `encpos`). Restricts the crawl; without it, the whole tree under `TARGET_COLLECTION` is walked. |
+| `--collections` / `-c` | *none* | Comma-separated collection ids, **case-sensitive** (`ENCPOS`, not `encpos`). Restricts the crawl; without it, the whole tree under `TARGET_COLLECTION` is walked. The documents already indexed for these collections are **purged** before indexing (step 4). |
 
 ## Examples
 
