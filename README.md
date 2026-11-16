@@ -1,4 +1,7 @@
-# The [DoTS search](https://dev.chartes.psl.eu/dots/api/dts/collection) API
+<h1 align="center">
+  <img src="mkdocs/docs/assets/dots-logo-es-cli.png" alt="DoTS logo" width="220"><br>
+  The <a href="https://dev.chartes.psl.eu/dots/api/dts/collection">DoTS search</a> API
+</h1>
 
 Elasticsearch API to search the [DoTS collections & resources](https://dev.chartes.psl.eu/dots/api/dts/collection).
 
