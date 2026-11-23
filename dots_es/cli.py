@@ -2006,6 +2006,28 @@ async def build_parent_chain(
     return [chain, chain_label]
 
 
+def reachable_chains(app, targets, chains, root_collection_id):
+    """
+    Keep the parent chains of the targeted collections that reach the root.
+
+    A collection unknown to the DTS, or whose ancestry breaks before the root,
+    has no place in the tree: it is reported and skipped, so that the other
+    targeted collections are still indexed.
+    """
+    reachable = []
+
+    for collection_id, (chain, chain_label) in zip(targets, chains):
+        if len(chain) < 2 or chain[0] != root_collection_id:
+            message = f"collection {collection_id} not found under {root_collection_id}"
+            print(f"⚠️ Collection {collection_id} introuvable sous {root_collection_id} : ignorée")
+            report_collection_exception(app, collection_id, LookupError(message), context="target_collection_not_found")
+            continue
+
+        reachable.append((chain, chain_label))
+
+    return reachable
+
+
 async def resource_worker(
     queue: asyncio.Queue,
     app,
@@ -2489,11 +2511,12 @@ async def crawl_collection(app, collection_id: str, target_collections: set | No
     if target_collections:
         tasks = []
         cache = {}
+        targets = sorted(target_collections)
         chains = await asyncio.gather(*(
             build_parent_chain(app, coll, stop_at=root_collection_id, stop_at_name=root_collection_name, client=client, cache=cache)
-            for coll in target_collections
+            for coll in targets
         ))
-        for chain, chain_label in chains:
+        for chain, chain_label in reachable_chains(app, targets, chains, root_collection_id):
             parent_id = chain[-2]
             tasks.append(crawl_branch(app, chain, chain_label, target_collections, visited, semaphore, resource_queue, parent_id, parent_path, parent_path_ids))
         await asyncio.gather(*tasks)

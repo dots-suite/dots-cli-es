@@ -1,6 +1,6 @@
 import asyncio
 
-from dots_es.cli import build_parent_chain, get_parent_collection
+from dots_es.cli import build_parent_chain, get_parent_collection, reachable_chains
 
 
 class FakeResponse:
@@ -84,3 +84,22 @@ def test_none_is_cached():
     assert first is None
     assert second is None
     assert client.calls == ["A"]
+
+
+def test_unknown_target_is_skipped_and_reported(monkeypatch):
+    reported = []
+    monkeypatch.setattr(
+        "dots_es.cli.report_collection_exception",
+        lambda app, collection_id, error, context: reported.append((collection_id, context)),
+    )
+    app = make_app()
+    chains = [
+        [["R", "A"], ["Root", "A"]],
+        [[], []],
+        [["B"], ["B"]],
+    ]
+
+    reachable = reachable_chains(app, ["A", "unknown", "B"], chains, "R")
+
+    assert reachable == [(["R", "A"], ["Root", "A"])]
+    assert reported == [("unknown", "target_collection_not_found"), ("B", "target_collection_not_found")]
