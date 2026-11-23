@@ -156,7 +156,7 @@ documents, so that a client can list them in corpus order.
 | `range[<field>]` | none | Repeated-key syntax, e.g. `range[temporal.temporal.dublincore.created_start]=gte:1200,lte:1300`. Operators: `gt`, `gte`, `lt`, `lte`. See [Date ranges](#date-ranges). |
 | `filters` | none | `field:value1\|value2,field2:value3` — one clause per comma, values within a field joined with `OR`. Each clause becomes a `query_string` restricted to that field. |
 | `page[number]` | `1` | Offset pagination. |
-| `page[size]` | `SEARCH_RESULT_PER_PAGE` (200) | **Minimum 25**, no maximum. |
+| `page[size]` | `SEARCH_RESULT_PER_PAGE` (200) | From 1 to `MAX_PAGE_SIZE` (200); a value outside is brought back within these bounds. |
 | `sort` | `dublinCore.created` ascending, then `_score` descending (resource full text); `_score` elsewhere; `corpus_order` last | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
 
 <sup>*</sup> These two parameters exist mainly for the
@@ -231,16 +231,19 @@ included. A facet that reaches it is logged as truncated by the API: raise `FACE
 Buckets are computed under the field `id` and republished to clients under the canonical `key`
 (`dct:creator` → `dublinCore.creator`).
 
-Two facets do not come from the registry and filter with OR logic:
+Four facets do not come from the registry and filter with OR logic:
 
-- **`collections`**: the collections of the results, keyed `id###title`;
+- **`collections`**: the collections of the results, keyed `id###title`. With a `collectionId`, it
+  only offers the collections below the searched one: the searched collection and the ones above it,
+  which every result belongs to, are removed, and the facet is not returned when nothing is left;
 - **`resources`**: the resources of the results, keyed `id###title` too (`MAUB-AB-01###Cartulaire de
   l’abbaye de Maubuisson, première partie`), with their title read from `RESOURCE_INDEX`. It counts
   resources in notice mode and fragments otherwise (the matching fragments of each resource in
-  full-text mode). Selecting a value filters on its `resource_id`. The first 1,000 resources are
-  listed.
+  full-text mode). Selecting a value filters on its `resource_id`;
+- **`citeType`** and **`level`**: the fragment structure, at fragment scope only, see
+  [Fragment types and levels](#fragment-types-and-levels).
 
-Neither narrows its own values when a value is selected, so the other values stay available — the
+None narrows its own values when a value is selected, so the other values stay available — the
 same rule as the registry facets.
 
 ## Sorting

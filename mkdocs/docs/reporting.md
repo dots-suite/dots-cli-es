@@ -35,8 +35,24 @@ start of the run.
 
 ## What to check after a run
 
-The CLI prints a summary — projects, sub-collections, resources, passages, excluded collections —
-followed by counts read back from the CSV files, then the per-phase Elasticsearch durations.
+The CLI prints two summaries.
+
+The **crawl summary** (`Résumé du crawler`) comes first: projects, sub-collections, resources and
+passages crawled, excluded collections, then the passages in error, the passages without text and the
+collections in error, read back from the CSV files.
+
+The **indexation summary** (`Résumé de l’indexation`) closes the run:
+
+- the passages and resources indexed out of those sent (`Passages indexés : 14290 / 14308`);
+- when Elasticsearch refused documents, their count and the three most frequent causes, each with its
+  number of documents (`18 × mapper_parsing_exception: …`);
+- when a cause is a field missing from a `strict` mapping, the field names and the fix:
+  `update-conf --rebuild` then a reindex, or adding the field to the conf first;
+- the paths of the reports holding the details (`passage_exceptions` and the document exceptions file);
+- the per-phase durations;
+- a verdict: `✅ Indexation réussie`, `⚠️ INDEXATION PARTIELLE` or `❌ ÉCHEC : aucun document indexé`.
+  After a `--collections` run with refusals, a last line warns that the purged collections lost
+  the refused documents from the search.
 
 A practical checklist:
 
@@ -44,8 +60,9 @@ A practical checklist:
    `context`.
 2. **Passages sans texte ≠ 0** → open the `no_text` file. These fragments are silently *not* indexed.
    A large count usually means a mismatch between DTS navigation and the TEI.
-3. **Always open `{ts}_passage_exceptions.csv`.** This is where Elasticsearch *rejections* land, and
-   they do not stop the run. A real example from this project:
+3. **A verdict other than `✅` in the indexation summary** → open `{ts}_passage_exceptions.csv`.
+   This is where Elasticsearch *rejections* land, and they do not stop the run. A real example from
+   this project:
 
     ```
     failed to parse field [fragment_metadata.dublincore.date] of type [date] … '1154-12-16–1157'
@@ -55,11 +72,8 @@ A practical checklist:
     typically mapping drift, where a dynamic `date` type was inferred from an earlier document.
 
 4. **Collection exceptions** point at DTS availability problems rather than at your mappings.
-5. **Cross-check the counts**: rows in `{ts}_indexed_passages_report.csv` versus the "passages"
-   figure of the summary, versus `GET /dots_fragments/_count`.
+5. **Cross-check the counts**: the passages indexed in the indexation summary versus
+   `GET /dots_fragments/_count`.
 6. **Watch stdout** for the `⚠️ Index … mapping 'dynamic=…' differs from conf` warning: it means the
    conf was never applied to that index.
 
-!!! tip "Bulk errors are not in the summary"
-    The end-of-run summary does not report Elasticsearch bulk errors. Count the rows of
-    `{ts}_passage_exceptions.csv` instead — that is where per-item bulk rejections land.

@@ -66,7 +66,8 @@ and the CLI tells you to rerun with `--rebuild`.
 
 ## `delete`
 
-Deletes indexes outright.
+Deletes indexes outright. A refusal from Elasticsearch stops the command with its HTTP status, and a
+missing index is only reported.
 
 | Option | Default | Effect |
 |---|---|---|

@@ -4,7 +4,7 @@ Most callers of this API are not humans: they are instances of the
 [dots-vue](https://github.com/dots-suite/dots-vue) front-end, which builds its requests from a JSON
 settings file **per collection**. Those files live in a settings repository — for example
 [dots-vue-demo-settings](https://github.com/dots-suite/dots-vue-demo-settings) — and two of their keys
-concern search directly.
+concern search directly: `customRoutes` and `searchConfig`.
 
 Nothing here affects indexing. The only settings key the CLI reads is `excludeCollectionIds`; see
 [Indexing](indexing.md#excluded-collections).
@@ -26,6 +26,33 @@ there. Without this entry the URL redirects to the collection home, and the coll
 search page — so no request ever reaches this API for it.
 
 `SearchPage` is case-sensitive.
+
+## `searchConfig` — what is searched
+
+Each collection has one search. Three keys of `searchConfig` decide which documents it lists and in
+which order, and translate directly into API parameters:
+
+```json
+"searchConfig": {
+  "target": "fragment",
+  "include": { "citeTypes": ["partie", "acte"] },
+  "defaultSort": "dublinCore.date"
+}
+```
+
+| Key | Values | Sent to the API as |
+|---|---|---|
+| `target` | `"resource"` (default) or `"fragment"` | `scope=fragment` for `"fragment"`, nothing otherwise. See [Resource or fragment scope](search-api.md#resource-or-fragment-scope). |
+| `include` | `{"citeTypes": [...]}` or `{"levels": [...]}`, with `target: "fragment"` only | `citeType=partie,acte` or `level=1`. Without it, every fragment is searched. See [Fragment types and levels](search-api.md#fragment-types-and-levels). |
+| `defaultSort` | a `sort` value, e.g. `"dublinCore.title"` or `"-dublinCore.date"` | `sort`, only when the search has no term: with a term, results come by relevance. |
+
+dots-vue gives these keys defaults (`target: "resource"`, `defaultSort: "dublinCore.title"`), and the
+settings redefine only the ones they need, key by key. When a collection changes `target`, it starts again from
+those defaults rather than from its parent's keys.
+
+The other keys of `searchConfig` — `columns` and `countLabel` — only shape the display and never reach
+this API; they are described in the
+[dots-vue-demo-settings documentation](https://dots-suite.github.io/dots-vue-demo-settings/search/).
 
 ## `searchConfig` — which facets are offered
 
@@ -60,10 +87,11 @@ search page — so no request ever reaches this API for it.
 
 | Field | Effect |
 |---|---|
-| `key` | A **canonical metadata key** — the same vocabulary the API publishes (`dublinCore.creator`, `extensions.author`), plus the special value `collections`. |
+| `key` | A **canonical metadata key** — the same vocabulary the API publishes (`dublinCore.creator`, `extensions.author`), plus the facets that do not come from the registry: `collections`, `resources`, and, at fragment scope, `citeType` and `level`. |
 | `enabled: false` | The key is collected and sent as **`excludeFacets`** (or **`excludeTemporalFacets`** for the temporal array). The facet is neither aggregated by Elasticsearch nor displayed. |
 | `label` | Front-end only: overrides the displayed name. |
 | `order` | Front-end only: display order. |
+| `sort` | Front-end only: order of the facet's values — `"label"` (default), `"count"` or `"corpus_order"` (the order of the corpus, see [Corpus order](search-api.md#corpus-order)); a `-` prefix reverses it. |
 
 !!! important "The logic is exclusion-based, not inclusion-based"
     A facet **absent** from the configuration is still aggregated and still displayed. Listing a facet

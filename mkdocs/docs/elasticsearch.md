@@ -19,6 +19,7 @@ dots_es/elasticsearch/
 | Element | Definition |
 |---|---|
 | `index.number_of_replicas` | `0` |
+| `index.max_result_window` | `1000000` |
 | filter `french_elision` | Elision, case-insensitive, 13 articles (`l`, `m`, `t`, `qu`, `n`, `s`, `j`, `d`, `c`, `jusqu`, `quoiqu`, `lorsqu`, `puisqu`). |
 | char filter `html_stripper` | `html_strip`. |
 | char filter `strip_leading_punctuation` | `pattern_replace` removing `^[^\p{L}\p{N}]+`, so leading punctuation does not break sorting. |
