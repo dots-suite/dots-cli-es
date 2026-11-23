@@ -506,6 +506,28 @@ SEARCH_FIELDS = [
         "extensions.about",
         SearchFieldFamily.SCHEMA,
         SearchFieldType.KEYWORD,
+        facet=True,
+        autocomplete=True,
+        multiple=True,
+    ),
+
+    SearchField(
+        "schema:genre",
+        "extensions.genre",
+        SearchFieldFamily.SCHEMA,
+        SearchFieldType.KEYWORD,
+        facet=True,
+        autocomplete=True,
+        multiple=True,
+    ),
+
+    SearchField(
+        "schema:keywords",
+        "extensions.keywords",
+        SearchFieldFamily.SCHEMA,
+        SearchFieldType.KEYWORD,
+        facet=True,
+        autocomplete=True,
         multiple=True,
     ),
 
