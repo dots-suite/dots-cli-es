@@ -11,7 +11,7 @@ overrides `--config`.
 Smoke test:
 
 ```
-http://localhost:5003/api/1.0/search?query=*&index=dots_document
+http://localhost:5003/api/1.0/search?query=*&index=dots_fragments
 ```
 
 ## The endpoint
@@ -31,10 +31,16 @@ The `no-highlight` parameter is a **mode switch**:
 
 === "Full-text mode (default)"
 
-    `no-highlight` absent. Queries fragments (`type.keyword == "fragment"`), collapses results by
-    `resource_id` with `inner_hits` named `fragments`, and highlights `content` with the **`fvh`**
-    highlighter (`<mark>` tags, `fragment_size: 80`, `number_of_fragments: 100`,
-    `fragment_offset: 25`, `no_match_size: 50`).
+    `no-highlight` absent. Runs in three requests, since passages only carry the `resource_id` of
+    their resource:
+
+    1. the text query on the passages lists the matching resources, with their number of matching
+       passages and the score of their best passage (composite aggregation, not capped);
+    2. `RESOURCE_INDEX` applies the facets, filters and date ranges to these resources, counts the
+       facets, sorts and paginates; a resource scores as its best passage;
+    3. the passages of the page's resources are collapsed by `resource_id` with `inner_hits` named
+       `fragments`, and `content` is highlighted with the **`fvh`** highlighter (`<mark>` tags,
+       `fragment_size: 80`, `number_of_fragments: 100`, `fragment_offset: 25`, `no_match_size: 50`).
 
     Response: `{buckets, facets, bucket_count, total_count, page, page_size, highlight_patterns, temporal}`.
 
@@ -49,25 +55,109 @@ The `no-highlight` parameter is a **mode switch**:
     The switch tests whether the parameter is a string, so **`no-highlight=false` also enables notice
     mode**. Omit the parameter entirely to stay in full-text mode.
 
-Both responses also carry `collection_indexed` and a `duration` in seconds.
+Both responses also carry `collection_indexed`, the `scope` used and a `duration` in seconds.
+
+## Resource or fragment scope
+
+Two parameters combine into four searches:
+
+- **`scope`** sets the level: the documents searched, the metadata and dates used to filter, facet
+  and sort, and the shape of the results;
+- **`no-highlight`** only sets what the query reads: the description (notice mode) or the text
+  (full-text mode).
+
+| | `scope=resource` (default) | `scope=fragment` |
+|---|---|---|
+| **Notice** (`no-highlight`) | Resource records (above). | Fragments, queried on `title`, `fragment_metadata.dublincore.title`, `fragment_metadata.extensions.name`. |
+| **Full-text** | Fragments grouped by resource (above). | Fragments, queried on `content` and `title`, highlighted. |
+| Metadata and dates | `resource_metadata`, `temporal` | `fragment_metadata`, `fragment_temporal` |
+| Results | `data` (notice) or `buckets` (full-text) | `data`: one item per fragment, never grouped |
+
+The two levels never mix. A resource search uses no fragment metadata or date, and a fragment search
+no resource metadata or date, whether for filtering, facets or sorting. The only resource data in a
+fragment search is the collection perimeter (`collectionId`, `collections` facet) and the resource
+title and collections returned for display.
+
+At fragment scope:
+
+- **results** are a flat list, so sorting and pagination apply to fragments: `sort=dublinCore.date`
+  lists the acts from the oldest to the most recent, and `total_count` counts fragments. Each item
+  carries `passage_id`, `title`, `level`, `citeType`, `ancestors`, its `metadata`
+  (`fragment_metadata`), its unflattened `temporal`, `highlight.content`, and, for display,
+  `resource_id`, `resource_title`, `path_ids`, `corpus_order` and `collection_facets`;
+- **the default sort** is the score, then the corpus order (`corpus_order`), which also breaks ties
+  after an explicit `sort`: without a query, fragments come in the order of the corpus;
+- **metadata facets** are the same facets as at resource scope, read in `fragment_metadata` and
+  counting fragments; `facets={"dublinCore.language": ["lat"]}` filters on the fragment's language.
+  As at resource scope, a facet that no fragment of the perimeter carries is not returned.
+  The `collections` facet also counts fragments;
+- **temporal facets** are discovered under `fragment_temporal.*`, so their `start_field` /
+  `end_field` point there and the front-end sends its ranges back on those fields;
+- **undated fragments are kept, after the dated ones.** As at resource scope, a date range is open:
+  a fragment without the date still matches, but each satisfied range adds to its score. Without a
+  text query the order is strict; with one, a very relevant undated fragment can still rank above a
+  weakly relevant dated one. An explicit `sort` replaces this order;
+- **notice mode** has no match in `content`: `highlight.content` holds its first 50 characters as a
+  preview (`no_match_size`).
+
+A `range[...]` on the dates of the other level (`fragment_temporal.*` at resource scope,
+`temporal.*` at fragment scope), a `sort` criterion that only exists for resources (`title`,
+`resource_metadata.*`) at fragment scope, and an unknown `scope` return **HTTP 400**. The client
+resets its date ranges and sort when the scope changes.
+
+### Fragment types and levels
+
+At fragment scope, `citeType` and `level` restrict the results to some fragment types and levels,
+comma-separated for several (`citeType=partie,acte`, `level=1`). Both can be combined. They are
+refused at resource scope (**HTTP 400**), as is a `level` that is not an integer.
+
+Two facets describe the fragment structure, at fragment scope only:
+
+- `citeType`, the fragment types of the results, always computed;
+- `level`, their levels, computed when the `level` parameter restricts the search.
+
+Like `resources`, their values are `value###value` facet keys, selected through `facets`
+(`{"citeType": ["acte###acte"]}`) with OR logic, and each one is counted against every clause but its own
+selection. A structure facet with a single value offers no choice and is not returned.
+
+```json
+"citeType": [
+  {"id": "acte", "label": "acte", "count": 13255, "facet_key": "acte###acte"},
+  {"id": "partie", "label": "partie", "count": 199, "facet_key": "partie###partie"}
+]
+```
+
+### Corpus order
+
+Resources and fragments carry `corpus_order`, the position of each collection in its parent, then of
+the resource, then, on fragments, of the fragment in its resource, as six-digit segments
+(`000001/000003/000024/000001`). Sorting on it (`sort=corpus_order`) lists them in the order of the
+corpus, as the tables of contents show it; it is also the last resort of every sort.
+
+The values of the `collections` and `resources` facets carry the smallest `corpus_order` of their
+documents, so that a client can list them in corpus order.
 
 ## Query parameters
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `index` | `DOCUMENT_INDEX` | Target Elasticsearch index. |
+| `index` | `FRAGMENT_INDEX` | Elasticsearch index of the passages. |
+| `resourceIndex` | `RESOURCE_INDEX` | Elasticsearch index of the resources. |
 | `query` | `match_all` | Supports exact phrases, `AND`/`OR`/`NOT`, `*` and `?` wildcards, and `field:value` with aliases. Default operator is `AND`, wildcards are analyzed. The available field aliases differ between the two modes. |
 | `no-highlight` | absent | Mode switch, see above. |
+| `scope` | `resource` | `resource` or `fragment`, see [above](#resource-or-fragment-scope). |
 | `collectionId` | none | Scopes the search to a collection subtree; also drives `collection_indexed` in the response. |
 | `collections` | none | `[a,b]` list of collection keys to **remove** from the returned collection facets. |
-| `facets` | none | JSON object `{canonical_key: [values]}` of selected facet values. `collections` uses OR logic; every other facet uses AND. |
-| `excludeFacets` <sup>*</sup> | none | Comma-separated canonical keys not to compute or return. `collections` is a valid value. |
+| `facets` | none | JSON object `{canonical_key: [values]}` of selected facet values. `collections`, `resources`, `citeType` and `level` use OR logic; every other facet uses AND. |
+| `citeType` | none | Fragment types listed at fragment scope, see [Fragment types and levels](#fragment-types-and-levels). |
+| `level` | none | Fragment levels listed at fragment scope, same section. |
+| `excludeFacets` <sup>*</sup> | none | Comma-separated canonical keys not to compute or return. `collections`, `resources`, `citeType` and `level` are valid values. |
 | `excludeTemporalFacets` <sup>*</sup> | none | Same, for temporal range facets. |
-| `range[<field>]` | none | Repeated-key syntax, e.g. `range[dublinCore.created]=gte:1200,lte:1300`. |
+| `range[<field>]` | none | Repeated-key syntax, e.g. `range[temporal.temporal.dublincore.created_start]=gte:1200,lte:1300`. Operators: `gt`, `gte`, `lt`, `lte`. See [Date ranges](#date-ranges). |
 | `filters` | none | `field:value1\|value2,field2:value3` — one clause per comma, values within a field joined with `OR`. Each clause becomes a `query_string` restricted to that field. |
 | `page[number]` | `1` | Offset pagination. |
-| `page[size]` | `SEARCH_RESULT_PER_PAGE` (200) | **Minimum 25**, no maximum. |
-| `sort` | `dublinCore.created` ascending, then `_score` descending | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
+| `page[size]` | `SEARCH_RESULT_PER_PAGE` (200) | From 1 to `MAX_PAGE_SIZE` (200); a value outside is brought back within these bounds. |
+| `sort` | `dublinCore.created` ascending, then `_score` descending (resource full text); `_score` elsewhere; `corpus_order` last | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
 
 <sup>*</sup> These two parameters exist mainly for the
 [dots-vue](https://github.com/dots-suite/dots-vue) front-end and the per-collection settings it
@@ -84,14 +174,77 @@ example repository [dots-vue-demo-settings](https://github.com/dots-suite/dots-v
     filters=resource_metadata.dublincore.creator:Molière|Racine
     ```
 
+## Date ranges
+
+Each temporal facet in the `temporal` part of the response gives the fields to filter on:
+
+```json
+{
+  "key": "dublinCore.date",
+  "start_field": "fragment_temporal.temporal.dublincore.date_start",
+  "end_field": "fragment_temporal.temporal.dublincore.date_end",
+  "min": 528,
+  "max": 1715,
+  "start_field_iso": "fragment_temporal.temporal.dublincore.date_start_iso",
+  "end_field_iso": "fragment_temporal.temporal.dublincore.date_end_iso",
+  "min_iso": "0528-01-01",
+  "max_iso": "1715-07-22"
+}
+```
+
+The `*_iso` keys are only present when the index holds ISO bounds for that facet.
+
+- **Year bounds** (`start_field`, `end_field`) take integers.
+- **ISO bounds** (`start_field_iso`, `end_field_iso`) take `YYYY`, `YYYY-MM` or `YYYY-MM-DD`, with a
+  leading `-` before year 1. Each value is rounded to its own precision, so `lte:1241-03` reaches
+  31 March 1241 and `gte:1241` starts on 1 January. Any other value returns **HTTP 400**.
+
+A period is matched by **overlap**: send `lte` on the start field and `gte` on the end field.
+
+```
+range[fragment_temporal.temporal.dublincore.date_start_iso]=lte:1241-03
+range[fragment_temporal.temporal.dublincore.date_end_iso]=gte:1241-03
+```
+
+This matches the acts of March 1241, and also an act dated only "1241", whose year overlaps March.
+
 ## Facets
 
 Facet aggregations are generated from the [search field registry](search-fields.md): one `terms`
-aggregation per non-range `KEYWORD` field declared with `facet=True`, each with a `cardinality`
-sub-aggregation on `resource_id` so that **counts are per resource, not per fragment**.
+aggregation per non-range `KEYWORD` field declared with `facet=True`. At resource scope it runs on
+`RESOURCE_INDEX`, one document per resource, so its `doc_count` is the **exact number of resources**;
+at fragment scope it counts fragments.
+
+Every facet counts, for each of its values, the documents matching the query and the other selected
+facets, **ignoring its own selection**: a value never narrows its own facet, so the values it could
+add stay visible. A metadata facet is therefore a `global` aggregation wrapping a `filter` that
+applies every clause except its own.
+
+A registry facet is only returned when at least one document of the perimeter carries it: the
+resources of the collection at resource scope, the fragments of the collection and of the requested
+`citeType` at fragment scope. A query or a selection can empty a facet, never remove it, so a
+collection only shows the facets its data fills.
+
+A facet returns all its values, up to `FACET_SIZE` (15 000) per facet, collections and resources
+included. A facet that reaches it is logged as truncated by the API: raise `FACET_SIZE` then.
 
 Buckets are computed under the field `id` and republished to clients under the canonical `key`
 (`dct:creator` → `dublinCore.creator`).
+
+Four facets do not come from the registry and filter with OR logic:
+
+- **`collections`**: the collections of the results, keyed `id###title`. With a `collectionId`, it
+  only offers the collections below the searched one: the searched collection and the ones above it,
+  which every result belongs to, are removed, and the facet is not returned when nothing is left;
+- **`resources`**: the resources of the results, keyed `id###title` too (`MAUB-AB-01###Cartulaire de
+  l’abbaye de Maubuisson, première partie`), with their title read from `RESOURCE_INDEX`. It counts
+  resources in notice mode and fragments otherwise (the matching fragments of each resource in
+  full-text mode). Selecting a value filters on its `resource_id`;
+- **`citeType`** and **`level`**: the fragment structure, at fragment scope only, see
+  [Fragment types and levels](#fragment-types-and-levels).
+
+None narrows its own values when a value is selected, so the other values stay available — the
+same rule as the registry facets.
 
 ## Sorting
 

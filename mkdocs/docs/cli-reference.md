@@ -30,7 +30,7 @@ Crawls the DTS tree through ThunderDots and populates both indexes. See [Indexin
 
 | Option | Default | Effect |
 |---|---|---|
-| `--collections`, `-c` | none | Comma-separated collection ids to restrict the crawl. **Case-sensitive**. |
+| `--collections`, `-c` | none | Comma-separated collection ids to restrict the crawl. **Case-sensitive**. Their documents already in both indexes are purged first, so resources removed or renamed in DTS disappear from the search. |
 
 ```bash
 dots-es-cli --config=local index
@@ -53,7 +53,7 @@ Applies the [mapping files](elasticsearch.md) to one or both indexes.
 
 ```bash
 dots-es-cli --config=local update-conf --rebuild
-ES_PASSWORD=xxx dots-es-cli --config=prod update-conf --rebuild --indexes=dots_document
+ES_PASSWORD=xxx dots-es-cli --config=prod update-conf --rebuild --indexes=dots_fragments
 ```
 
 Without `--rebuild` on an existing index, Elasticsearch answers `resource_already_exists_exception`
@@ -66,14 +66,15 @@ and the CLI tells you to rerun with `--rebuild`.
 
 ## `delete`
 
-Deletes indexes outright.
+Deletes indexes outright. A refusal from Elasticsearch stops the command with its HTTP status, and a
+missing index is only reported.
 
 | Option | Default | Effect |
 |---|---|---|
 | `--indexes` | **required** | Comma-separated index names. |
 
 ```bash
-dots-es-cli --config=local delete --indexes=dots_document
+dots-es-cli --config=local delete --indexes=dots_fragments
 ```
 
 ---
@@ -90,7 +91,7 @@ A convenience query runner; the result is pretty-printed to stdout.
 
 ```bash
 dots-es-cli --config=local search "Molière"
-dots-es-cli search -t "content:tragédie AND type.keyword:fragment" --indexes=dots_document
+dots-es-cli search -t "content:tragédie AND type.keyword:fragment" --indexes=dots_fragments
 ```
 
 !!! note "`--term` is the *broader* mode"

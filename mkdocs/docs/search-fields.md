@@ -41,7 +41,7 @@ Two groupings drive the Elasticsearch paths:
   queried;
 - `SORTABLE_FAMILIES = METADATA_FAMILIES + (DTS,)`.
 
-The registry is organised in blocks: CLI navigation fields (`parent_id`, `path`, `path_ids`,
+The registry is organised in blocks: CLI navigation fields (`parent_id`, `path_ids`,
 `ancestors`), DTS fields (`id`, `type`, `title`, `description`, `download`, `content`), Dublin Core,
 schema.org, DoTS extensions, and finally temporal range facets generated from ThunderDots output.
 
@@ -53,8 +53,42 @@ schema.org, DoTS extensions, and finally temporal range facets generated from Th
 - allowed extension keys are the `path` of every `SCHEMA` field;
 - **anything not declared is dropped.**
 
-Temporal metadata goes through `build_filtered_temporal_metadata()`, which keeps only the
-`_start`/`_end` bounds of declared range facets and discards raw and `*_iso` values.
+Fragment metadata goes through the same filter (`extract_fragment_metadata()`), so the contract is
+identical at both levels. The optional `tei` block of a fragment is kept as is.
+
+Temporal metadata goes through `build_filtered_temporal_metadata()`, which keeps only the bounds of
+declared range facets and discards raw values. It is applied to the resource `temporal` and to each
+`fragment_temporal`. Each bound is kept twice:
+
+| Bound | Type | Example for `1241-03` |
+|---|---|---|
+| `range_start` / `range_end` (`…_start`, `…_end`) | `integer`, year | `1241` / `1241` |
+| `range_start_iso` / `range_end_iso` (`…_start_iso`, `…_end_iso`) | `date`, `strict_date` | `1241-03-01` / `1241-03-31` |
+
+The ISO bounds keep the precision of the source value: a year covers the whole year, a month the
+whole month, a day that single day.
+
+ISO bounds that are not `[-]YYYY-MM-DD` dates are dropped, and the year bound is kept. Before
+ThunderDots 0.1.8, the ISO bound of a year ≤ 0 was the bare year (`-50`), which Elasticsearch would
+read as epoch milliseconds (1969-12-31) under the default date format, and reject with the whole
+passage under `strict_date`. Years beyond four digits (`+170000002-01-01`) are dropped for the same
+reason.
+
+### Dates are ISO 8601 / EDTF
+
+Source dates are taken as ISO 8601 / EDTF, **without interpretation**. Years are therefore
+astronomical, in the index, the API and the facets alike:
+
+| Source value | Meaning | Indexed years | Indexed ISO bounds |
+|---|---|---|---|
+| `-0500/0499` | 501 BC → 499 | `-500` / `499` | `-0500-01-01` / `0499-12-31` |
+| `-0499` | 500 BC | `-499` / `-499` | `-0499-01-01` / `-0499-12-31` |
+| `0000` | 1 BC | `0` / `0` | `0000-01-01` / `0000-12-31` |
+| `XXXX-11-21` | a day, year unknown | none | none |
+
+The indexer cannot tell an editor who wrote `-0500` for 500 BC from one who meant 501 BC, so it does
+not try: providing the right EDTF value is up to the editors, upstream of ThunderDots. A day without a
+year must be written `XXXX-MM-DD`; `0000-MM-DD` is a day of 1 BC.
 
 !!! note "`DOTS` fields are declared but deliberately not indexed"
     The extension whitelist collects only fields whose family is `SCHEMA`, so the two `DOTS`
@@ -72,7 +106,7 @@ Temporal metadata goes through `build_filtered_temporal_metadata()`, which keeps
 |---|---|
 | `get_es_path` | Prefixes `resource_metadata.` for `DCT`/`SCHEMA`/`DOTS`; other families use `path` verbatim. |
 | `get_es_field` | Appends `.keyword` for `KEYWORD` fields. |
-| `build_searchfield_aggs` | One `terms` aggregation per non-range `KEYWORD` facet, named after `field.id`, with a nested `cardinality` sub-aggregation on `resource_id` so counts are **per resource**, not per fragment. |
+| `build_searchfield_aggs` | One `terms` aggregation per non-range `KEYWORD` facet, named after `field.id`. At resource scope it runs on `RESOURCE_INDEX`, one document per resource, so `doc_count` is an exact count **per resource**. |
 | `extract_searchfield_facets` | Reads buckets by `field.id` and republishes them under `field.key`. |
 | `get_es_sort_field` / `resolve_sort_field` | `TEMPORAL` sorts on `temporal.{range_start}`; text, keyword and URL fields sort on the `.sort` sub-field (normalizer `sortable`), never on `.keyword`. |
 

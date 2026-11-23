@@ -25,14 +25,15 @@ is fixed: one deployment, one configuration directory.
 | `TARGET_COLLECTION` | Identifier of the collection to crawl. **Case-sensitive** — it must match the DTS identifier exactly (`ENCPOS`, not `encpos`). **Empty** means "start from the DTS root collection", which is resolved at runtime. |
 | `CUSTOM_SETTINGS_PATH` | Directory of front-end `*.conf.json` settings files. Every `excludeCollectionIds` entry found there is added to the exclusion set. Environment-interpolated. |
 | `ADDITIONAL_EXCLUDED_COLLECTIONS` | List of collection ids to skip, merged with the ones derived from `CUSTOM_SETTINGS_PATH`. **Case-insensitive**, unlike `TARGET_COLLECTION`: both the list and the candidate identifier are lowercased before comparison, so `ENCPOS` and `encpos` are equivalent here. |
+| `FRAGMENT_TEMPORAL_XPATH` | XPath passed to ThunderDots as `fragment_params.temporal_xpath`, evaluated relative to each fragment in the TEI (e.g. `.//tei:docDate//tei:date`). Matching dates are read from `@when`, `@notBefore`/`@notAfter`, `@from`/`@to` or the text, and stored under `fragment_metadata.tei.date` (first match; all matches under `tei.dates` when there are several). The key is `tei.date` whatever the XPath, so the `tei.date` range facet is stable, but its meaning (act date, any date…) is set by this XPath, once per deployment. **Empty** (default) means fragment dates come from the DTS navigation metadata only. |
 
 ### `config:` — Elasticsearch and the API
 
 | Key | Controls |
 |---|---|
 | `ELASTICSEARCH_URL` | ES endpoint used by both the CLI and the API. |
-| `DOCUMENT_INDEX` | Index holding resources **and** passages. Default `dots_document`. |
-| `COLLECTION_INDEX` | Index holding collections. Default `dots_collection`. |
+| `RESOURCE_INDEX` | Index holding the resources, one document each. Default `dots_resources`, also when the key is missing. |
+| `FRAGMENT_INDEX` | Index holding the passages. Default `dots_fragments`. |
 | `SEARCH_RESULT_PER_PAGE` | Default `page[size]` of the search API. Default `200`. |
 
 ### Differences between the three files
@@ -90,7 +91,7 @@ the directory the command is run from. It then:
 1. replaces every `None` with an empty string;
 2. expands environment variables in **every** string value;
 3. **flattens** `source:` and `config:` into a single dictionary — `app.config["DTS_URL"]` and
-   `app.config["DOCUMENT_INDEX"]` sit side by side;
+   `app.config["FRAGMENT_INDEX"]` sit side by side;
 4. coerces `ADDITIONAL_EXCLUDED_COLLECTIONS` into a lowercase set.
 
 !!! warning "Operational caveats"

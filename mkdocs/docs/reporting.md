@@ -8,7 +8,7 @@ All files of a single run share one UTC timestamp prefix with minute resolution,
 the CLI starts:
 
 ```
-2026_09_09_09_57_dots_document_indexation_exceptions.csv
+2026_09_09_09_57_dots_fragments_indexation_exceptions.csv
 2026_09_09_09_57_indexed_passages_report.csv
 …
 ```
@@ -22,12 +22,12 @@ the CLI starts:
 | File | Columns | Written when |
 |---|---|---|
 | `{ts}_indexed_passages_report.csv` | `timestamp, resource_id, passage_id` | One row per passage successfully built. This is your reference count. |
-| `{ts}_{DOCUMENT_INDEX}_indexation_exceptions.csv` | `timestamp, resource_id, passage_id, error_type, error_message, context` | A passage could not be built. **Also reused** for resource-level indexing failures, which write a shorter 5-column row — so this file can mix two row shapes. |
-| `{ts}_{DOCUMENT_INDEX}_no_text.csv` | `timestamp, resource_id, passage_id, citeType, level, reason, context` | A fragment has neither `content` nor `head`, and was **skipped**. `reason` is always `NoIndexableText`. |
-| `{ts}_{COLLECTION_INDEX}_indexation_exceptions.csv` | `timestamp, collection_id, error_type, error_message, context` | DTS collection fetch errors, JSONL write failures, and Elasticsearch collection indexing failures. |
+| `{ts}_{FRAGMENT_INDEX}_indexation_exceptions.csv` | `timestamp, resource_id, passage_id, error_type, error_message, context` | A passage could not be built. **Also reused** for resource-level indexing failures, which write a shorter 5-column row — so this file can mix two row shapes. |
+| `{ts}_{FRAGMENT_INDEX}_no_text.csv` | `timestamp, resource_id, passage_id, citeType, level, reason, context` | A fragment has neither `content` nor `head`, and was **skipped**. `reason` is always `NoIndexableText`. |
+| `{ts}_collection_exceptions.csv` | `timestamp, collection_id, error_type, error_message, context` | DTS collection fetch errors. |
 | `{ts}_passage_exceptions.csv` | `timestamp, resource_id, passage_id, error_type, error_message, context` | JSON decode failures, bulk call failures, and **per-item Elasticsearch bulk rejections**. |
 | `{ts}_metadata_dts_sanitization.csv` | `timestamp, collection_id, json_path, error_type, value` | Empty JSON keys found while sanitising a raw DTS response. |
-| `{ts}_dots_indexation_timing.csv` | `timestamp, level, id, parent_id, duration_sec, duration_hms` | One row per indexing phase at the end of the run: `fragments_indexation`, `documents_indexation`, `collections_indexation` and their `total_indexation` parent. |
+| `{ts}_dots_indexation_timing.csv` | `timestamp, level, id, parent_id, duration_sec, duration_hms` | One row per indexing phase at the end of the run: `fragments_indexation`, `documents_indexation` and their `total_indexation` parent. |
 
 Every report carries its header row: the writer creates the file with its header the first time a row
 is appended, so a file is never produced headerless — even the ones that are not pre-created at the
@@ -35,8 +35,24 @@ start of the run.
 
 ## What to check after a run
 
-The CLI prints a summary — projects, sub-collections, resources, passages, excluded collections —
-followed by counts read back from the CSV files, then the per-phase Elasticsearch durations.
+The CLI prints two summaries.
+
+The **crawl summary** (`Résumé du crawler`) comes first: projects, sub-collections, resources and
+passages crawled, excluded collections, then the passages in error, the passages without text and the
+collections in error, read back from the CSV files.
+
+The **indexation summary** (`Résumé de l’indexation`) closes the run:
+
+- the passages and resources indexed out of those sent (`Passages indexés : 14290 / 14308`);
+- when Elasticsearch refused documents, their count and the three most frequent causes, each with its
+  number of documents (`18 × mapper_parsing_exception: …`);
+- when a cause is a field missing from a `strict` mapping, the field names and the fix:
+  `update-conf --rebuild` then a reindex, or adding the field to the conf first;
+- the paths of the reports holding the details (`passage_exceptions` and the document exceptions file);
+- the per-phase durations;
+- a verdict: `✅ Indexation réussie`, `⚠️ INDEXATION PARTIELLE` or `❌ ÉCHEC : aucun document indexé`.
+  After a `--collections` run with refusals, a last line warns that the purged collections lost
+  the refused documents from the search.
 
 A practical checklist:
 
@@ -44,8 +60,9 @@ A practical checklist:
    `context`.
 2. **Passages sans texte ≠ 0** → open the `no_text` file. These fragments are silently *not* indexed.
    A large count usually means a mismatch between DTS navigation and the TEI.
-3. **Always open `{ts}_passage_exceptions.csv`.** This is where Elasticsearch *rejections* land, and
-   they do not stop the run. A real example from this project:
+3. **A verdict other than `✅` in the indexation summary** → open `{ts}_passage_exceptions.csv`.
+   This is where Elasticsearch *rejections* land, and they do not stop the run. A real example from
+   this project:
 
     ```
     failed to parse field [fragment_metadata.dublincore.date] of type [date] … '1154-12-16–1157'
@@ -55,11 +72,8 @@ A practical checklist:
     typically mapping drift, where a dynamic `date` type was inferred from an earlier document.
 
 4. **Collection exceptions** point at DTS availability problems rather than at your mappings.
-5. **Cross-check the counts**: rows in `{ts}_indexed_passages_report.csv` versus the "passages"
-   figure of the summary, versus `GET /dots_document/_count`.
+5. **Cross-check the counts**: the passages indexed in the indexation summary versus
+   `GET /dots_fragments/_count`.
 6. **Watch stdout** for the `⚠️ Index … mapping 'dynamic=…' differs from conf` warning: it means the
    conf was never applied to that index.
 
-!!! tip "Bulk errors are not in the summary"
-    The end-of-run summary does not report Elasticsearch bulk errors. Count the rows of
-    `{ts}_passage_exceptions.csv` instead — that is where per-item bulk rejections land.

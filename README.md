@@ -127,7 +127,7 @@ When the index doesn't exist it is created according to the project ES [configur
 This operation will delete the pre-existing index.
 
 <pre><code>
-(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-es-cli (--config=<b><i>local/staging/prod</i></b>) update-conf --rebuild --indexes=<b><i>dots_document/dots_collection</i></b>
+(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-es-cli (--config=<b><i>local/staging/prod</i></b>) update-conf --rebuild --indexes=<b><i>dots_resources/dots_fragments</i></b>
 </code></pre>
 
 The above command updates the indexes according to the project ES [configuration files](./dots_es/elasticsearch/).
@@ -136,13 +136,13 @@ The above command updates the indexes according to the project ES [configuration
 
 - with ES security disabled:
 <pre><code>
-curl -X POST "http://localhost:9200/dots_document/_refresh?pretty"
+curl -X POST "http://localhost:9200/dots_fragments/_refresh?pretty"
 curl http://localhost:9200/_cat/indices?v
 </code></pre>
 
 - with ES security enabled:
 <pre><code>
-curl -X POST "http://elastic:<b><i>ELASTIC_PASSWORD</i></b>@localhost:9200/dots_document/_refresh?pretty"
+curl -X POST "http://elastic:<b><i>ELASTIC_PASSWORD</i></b>@localhost:9200/dots_fragments/_refresh?pretty"
 curl http://elastic:<b><i>ELASTIC_PASSWORD</i></b>@localhost:9200/_cat/indices?v
 </code></pre>
 
@@ -154,7 +154,7 @@ curl http://elastic:<b><i>ELASTIC_PASSWORD</i></b>@localhost:9200/_cat/indices?v
 - Reactivate the virtual environment if needed (<code>source <b><i>your_venv_name</i></b>/bin/activate</code>)
 - Launch:
   <code>(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-api</code> (or <code>python3 flask_app.py</code>)
-- Then visit http://localhost:5003/api/1.0/search?query=\*&index=dots_document to test it is running
+- Then visit http://localhost:5003/api/1.0/search?query=\*&index=dots_fragments to test it is running
 
 ## Launch the front-end:
 

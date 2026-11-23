@@ -13,29 +13,55 @@ dots-es-cli [--config local|staging|prod] index [--collections id1,id2]
 2. **Crawl from memory.** The crawler resolves each collection and resource from the dictionaries
    built at step 1 instead of issuing an HTTP request per node. Records are normalised and written as
    JSONL under `out/`.
-3. **Ensure the indexes exist.** For each of `DOCUMENT_INDEX` and `COLLECTION_INDEX`: if missing, it
+3. **Ensure the indexes exist.** For each of `FRAGMENT_INDEX` and `RESOURCE_INDEX`: if missing, it
    is created from the [mapping files](elasticsearch.md); if present, a
    [mapping-drift warning](elasticsearch.md#mapping-drift) is printed when the live `dynamic` setting
    differs from the conf.
-4. **Bulk-index passages** into `DOCUMENT_INDEX`, with `_id = "{resource_id}::{passage_id}"`.
-5. **Index resource documents** into `DOCUMENT_INDEX`, one by one.
-6. **Index collections** into `COLLECTION_INDEX`.
+4. **Purge the reindexed collections** (only with `--collections`). Before indexing, every passage
+   and resource of the given collections is deleted from both indexes, at any depth (a prefix
+   `{id}###` on `collection_facets`, the filter the search API applies; a resource id matches
+   through `resource_id`). Indexing only adds or overwrites documents, so without this purge a
+   resource removed or renamed in DTS would stay searchable and its links would answer a DTS 400.
+   The purge is skipped if the crawl failed, and nothing is purged nor indexed if the crawl wrote
+   no JSONL file.
+5. **Bulk-index passages** into `FRAGMENT_INDEX`, with `_id = "{resource_id}::{passage_id}"`.
+6. **Index resource documents** into `RESOURCE_INDEX`, one by one.
 7. **Print a summary** and write the [CSV reports](reporting.md).
 
 !!! info "Fragments come from ThunderDots, not from TEI parsing here"
     Passages are built **only** from the pre-normalised `fragments` returned by ThunderDots
     (`fragment_mode="navigation"`): no TEI parsing and no navigation index are performed in this
-    project. A resource with no fragments falls back to a single `__fulltext__` passage built from its
-    plain text.
+    project. For a resource without navigation, ThunderDots returns a single `__DOCUMENT__` fragment
+    holding its whole text: it is indexed at level 1 with the `text` citeType, and takes the title,
+    metadata and dates of its resource. A resource with no fragment at all falls back to a single
+    `__fulltext__` passage built from its plain text.
 
-    A fragment carries `id`, `level`, `head`, `content`, `citeType`, `parent` and
-    `metadata_dublincore`.
+    A fragment carries `id`, `level`, `head`, `content`, `citeType`, `parent`, its own `metadata`
+    (`dublincore` and `extensions` from the DTS navigation member, `tei` from
+    [`FRAGMENT_TEMPORAL_XPATH`](configuration.md)) and its own `temporal` index.
+
+## Resource and fragment metadata
+
+Resource and fragment metadata are stored in two indexes:
+
+| Field | Index | Source |
+|---|---|---|
+| `resource_metadata`, `temporal`, `collections` | `RESOURCE_INDEX` | The resource, stored once. A passage only carries its `resource_id`, plus `path_ids` and `collection_facets` for scoping. |
+| `fragment_metadata`, `fragment_temporal` | `FRAGMENT_INDEX` | The fragment itself. Empty when the DTS server describes nothing at that level. |
+
+ThunderDots never copies resource metadata or dates into fragments, and neither does this project:
+a cartulaire act dated March 1241 has `fragment_temporal` 1241, while its `temporal` holds the
+coverage of the whole cartulaire (1204–1715) and the date of the edition.
+
+`fragment_metadata.dublincore` and `fragment_metadata.extensions` follow the same
+[SEARCH_FIELDS contract](search-fields.md) as the resource metadata; `fragment_temporal` goes through
+the same `build_filtered_temporal_metadata()`.
 
 ## Options
 
 | Option | Default | Effect |
 |---|---|---|
-| `--collections` / `-c` | *none* | Comma-separated collection ids, **case-sensitive** (`ENCPOS`, not `encpos`). Restricts the crawl; without it, the whole tree under `TARGET_COLLECTION` is walked. |
+| `--collections` / `-c` | *none* | Comma-separated collection ids, **case-sensitive** (`ENCPOS`, not `encpos`). Restricts the crawl; without it, the whole tree under `TARGET_COLLECTION` is walked. The documents already indexed for these collections are **purged** before indexing (step 4). |
 
 ## Examples
 
@@ -73,7 +99,7 @@ They are the reason `DTS_URL` must stay reachable even though the graph is prefe
 Refresh and count:
 
 ```bash
-curl -X POST "http://localhost:9200/dots_document/_refresh?pretty"
+curl -X POST "http://localhost:9200/dots_fragments/_refresh?pretty"
 curl "http://localhost:9200/_cat/indices?v"
 ```
 
